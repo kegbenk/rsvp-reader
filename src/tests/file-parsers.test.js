@@ -175,16 +175,17 @@ describe('parseEPUB', () => {
     const epubjs = await import('epubjs')
 
     const mockSection = {
-      load: vi.fn().mockResolvedValue('<html><body>Chapter content here</body></html>')
+      href: 'chapter1.xhtml'
     }
 
     const mockBook = {
       ready: Promise.resolve(),
+      loaded: { spine: Promise.resolve() },
       spine: {
         items: [mockSection],
         spineItems: [mockSection]
       },
-      load: vi.fn()
+      load: vi.fn().mockResolvedValue('<html><body>Chapter content here</body></html>')
     }
 
     epubjs.default.mockReturnValue(mockBook)
@@ -200,21 +201,21 @@ describe('parseEPUB', () => {
   it('should handle EPUB with multiple chapters', async () => {
     const epubjs = await import('epubjs')
 
-    const mockSection1 = {
-      load: vi.fn().mockResolvedValue('<html><body>Chapter One</body></html>')
-    }
-
-    const mockSection2 = {
-      load: vi.fn().mockResolvedValue('<html><body>Chapter Two</body></html>')
-    }
+    const mockSection1 = { href: 'chapter1.xhtml' }
+    const mockSection2 = { href: 'chapter2.xhtml' }
 
     const mockBook = {
       ready: Promise.resolve(),
+      loaded: { spine: Promise.resolve() },
       spine: {
         items: [mockSection1, mockSection2],
         spineItems: [mockSection1, mockSection2]
       },
-      load: vi.fn()
+      load: vi.fn().mockImplementation((href) => {
+        if (href === 'chapter1.xhtml') return Promise.resolve('<html><body>Chapter One</body></html>')
+        if (href === 'chapter2.xhtml') return Promise.resolve('<html><body>Chapter Two</body></html>')
+        return Promise.resolve('')
+      })
     }
 
     epubjs.default.mockReturnValue(mockBook)
@@ -229,21 +230,21 @@ describe('parseEPUB', () => {
   it('should handle failed section loads gracefully', async () => {
     const epubjs = await import('epubjs')
 
-    const mockSection1 = {
-      load: vi.fn().mockRejectedValue(new Error('Failed to load'))
-    }
-
-    const mockSection2 = {
-      load: vi.fn().mockResolvedValue('<html><body>Working chapter</body></html>')
-    }
+    const mockSection1 = { href: 'broken.xhtml' }
+    const mockSection2 = { href: 'working.xhtml' }
 
     const mockBook = {
       ready: Promise.resolve(),
+      loaded: { spine: Promise.resolve() },
       spine: {
         items: [mockSection1, mockSection2],
         spineItems: [mockSection1, mockSection2]
       },
-      load: vi.fn()
+      load: vi.fn().mockImplementation((href) => {
+        if (href === 'broken.xhtml') return Promise.reject(new Error('Failed to load'))
+        if (href === 'working.xhtml') return Promise.resolve('<html><body>Working chapter</body></html>')
+        return Promise.resolve('')
+      })
     }
 
     epubjs.default.mockReturnValue(mockBook)
