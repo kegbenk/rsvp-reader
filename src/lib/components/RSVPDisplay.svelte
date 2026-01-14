@@ -118,7 +118,7 @@
   }
 
   .word-container.multi-mode {
-    font-size: clamp(2rem, 6vw, 4rem);
+    font-size: clamp(1.2rem, 4vw, 3rem);
   }
 
   .context-words {
@@ -169,7 +169,13 @@
     }
 
     .word-container.multi-mode {
-      font-size: clamp(1.5rem, 5vw, 3rem);
+      font-size: clamp(0.9rem, 3.5vw, 2rem);
+    }
+  }
+
+  @media (max-width: 400px) {
+    .word-container.multi-mode {
+      font-size: clamp(0.75rem, 3vw, 1.5rem);
     }
   }
 </style>

@@ -1,7 +1,7 @@
 {
   "name": "rsvp",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,9 +9,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage",
-    "deploy:aws": "bash deploy/aws-s3-deploy.sh",
-    "deploy:aws:cdn": "bash deploy/aws-cloudfront-setup.sh"
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^6.2.1",

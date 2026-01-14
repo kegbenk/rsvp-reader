@@ -39,6 +39,7 @@
 </script>
 
 <div class="progress-wrapper" class:minimal>
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
     class="progress-container"
     class:clickable
