@@ -50,6 +50,23 @@ npm install
 npm run dev
 ```
 
+## Docker
+
+Run the app using Docker Compose:
+
+```bash
+cd docker
+docker compose up -d
+```
+
+The app will be available at http://localhost:8080
+
+To rebuild after changes:
+
+```bash
+docker compose up -d --build
+```
+
 ## Usage
 
 ### Running the App
