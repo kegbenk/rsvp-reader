@@ -273,8 +273,14 @@
           showTextInput = false;
         } else if (showSavedSessionPrompt) {
           showSavedSessionPrompt = false;
-        } else {
-          stop();
+        } else if (isPlaying || isPaused) {
+          // Exit focus mode but preserve position
+          isPlaying = false;
+          isPaused = false;
+          if (intervalId) {
+            clearTimeout(intervalId);
+            intervalId = null;
+          }
         }
         break;
       case 'KeyG':
@@ -414,7 +420,7 @@
   {/if}
 
   {#if showJumpTo && !isFocusMode}
-    <div class="panel-overlay" on:click|self={() => showJumpTo = false}>
+    <div class="panel-overlay" on:click|self={() => showJumpTo = false} role="presentation">
       <div class="jump-to-panel">
         <h3>Jump to position</h3>
         <p class="jump-hint">Enter word number (e.g., 150) or percentage (e.g., 50%)</p>
@@ -494,7 +500,7 @@
     {#if !isFocusMode}
       <div class="shortcuts desktop-only">
         <kbd>Space</kbd> Play
-        <kbd>Esc</kbd> Stop
+        <kbd>Esc</kbd> Exit
         <kbd>↑↓</kbd> Speed
         <kbd>←→</kbd> Skip
         <kbd>G</kbd> Jump

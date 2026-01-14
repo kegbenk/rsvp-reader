@@ -89,7 +89,7 @@ npm run preview
 | Key | Action |
 |-----|--------|
 | `Space` | Play/Pause/Resume |
-| `Escape` | Stop (or close panels) |
+| `Escape` | Exit focus mode (or close dialogs) |
 | `Arrow Up` | Increase speed (+25 WPM) |
 | `Arrow Down` | Decrease speed (-25 WPM) |
 | `Arrow Left` | Go back one word |

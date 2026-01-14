@@ -25,11 +25,6 @@
     class="progress-container"
     class:clickable
     on:click={handleClick}
-    role={clickable ? "slider" : undefined}
-    aria-valuenow={clickable ? progress : undefined}
-    aria-valuemin={clickable ? 0 : undefined}
-    aria-valuemax={clickable ? 100 : undefined}
-    tabindex={clickable ? 0 : undefined}
   >
     <div class="progress-bar" style="width: {progress}%"></div>
   </div>
