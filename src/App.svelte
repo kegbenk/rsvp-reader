@@ -453,8 +453,23 @@
     const file = event.detail.file;
     if (!file) return;
 
+    // Stop playback and auto-save FIRST (before setting loading flag)
+    if (isPlaying || isPaused) {
+      isPlaying = false;
+      isPaused = false;
+      if (intervalId) {
+        clearTimeout(intervalId);
+        intervalId = null;
+      }
+    }
+    stopAutoSave();
+
     isLoadingFile = true;
     loadingMessage = `Loading ${file.name}...`;
+
+    // Clear old session to free memory (don't save - it will be overwritten anyway)
+    console.log('[File Load] Clearing old session to free memory...');
+    await clearSession();
 
     try {
       const result = await parseFile(file);
@@ -470,7 +485,8 @@
         contentStructure = null;
       }
 
-      stop();
+      // Reset UI state (don't call stop() - it tries to save)
+      wordOpacity = 1;
       showTextInput = false;
       loadingMessage = '';
 
@@ -479,6 +495,8 @@
       currentChapterIndex = 0;
       readerScrollPosition = 0;
       progress = 0;
+
+      console.log('[File Load] New content loaded successfully');
     } catch (error) {
       console.error('Error parsing file:', error);
       loadingMessage = `Error: ${error.message}`;
@@ -659,12 +677,6 @@
           }
         }
         break;
-      case 'KeyS':
-        if (e.ctrlKey || e.metaKey) {
-          e.preventDefault();
-          saveCurrentSession();
-        }
-        break;
       case 'ArrowUp':
         e.preventDefault();
         wordsPerMinute = Math.min(1000, wordsPerMinute + 25);
@@ -832,16 +844,6 @@
         >
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>
-          </svg>
-        </button>
-        <button
-          class="icon-btn"
-          on:click={saveCurrentSession}
-          title="Save progress (Ctrl+S)"
-          disabled={words.length === 0}
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor">
-            <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
           </svg>
         </button>
         <button
@@ -1100,7 +1102,6 @@
           <kbd>T</kbd> TOC
         {/if}
         <kbd>G</kbd> Jump
-        <kbd>Ctrl+S</kbd> Save
       </div>
       <div class="touch-controls mobile-only">
         <button class="touch-btn" on:click={() => currentWordIndex = Math.max(0, currentWordIndex - 5)} title="Back 5 words">
