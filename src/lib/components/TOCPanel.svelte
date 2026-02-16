@@ -1,10 +1,12 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
 
   export let toc = [];
   export let currentChapterIndex = 0;
 
   const dispatch = createEventDispatcher();
+  let tocListEl;
+  let lastScrolledChapterIndex = -1;
 
   function handleTOCClick(item) {
     dispatch('navigate', { chapter: item, index: item.chapterIndex });
@@ -20,6 +22,37 @@
       handleTOCClick(item);
     }
   }
+
+  function scrollToActiveChapter() {
+    if (!tocListEl) return;
+
+    // Find the active TOC item
+    const activeItem = tocListEl.querySelector('.toc-item.active');
+    if (activeItem) {
+      // Scroll the active item to the center of the visible area
+      activeItem.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+        inline: 'nearest'
+      });
+      lastScrolledChapterIndex = currentChapterIndex;
+    }
+  }
+
+  // Scroll to active chapter when panel first opens
+  onMount(() => {
+    // Use setTimeout to ensure DOM is fully rendered
+    setTimeout(() => {
+      scrollToActiveChapter();
+    }, 50);
+  });
+
+  // Scroll when active chapter changes
+  $: if (tocListEl && currentChapterIndex !== lastScrolledChapterIndex) {
+    setTimeout(() => {
+      scrollToActiveChapter();
+    }, 50);
+  }
 </script>
 
 <div class="toc-panel">
@@ -30,7 +63,7 @@
     </button>
   </div>
 
-  <div class="toc-list">
+  <div class="toc-list" bind:this={tocListEl}>
     {#if toc.length === 0}
       <p class="no-toc">No table of contents available</p>
     {:else}
