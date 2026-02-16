@@ -26,6 +26,18 @@
 
   // FIX: Detect Hebrew, Arabic, and other RTL scripts
   $: isRtl = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/.test(currentWord);
+
+  // Dynamic font size based on word length
+  $: dynamicFontSize = (() => {
+    if (useMultiMode) return '1'; // Use default for multi-word mode
+
+    const wordLength = currentWord.length;
+    if (wordLength <= 8) return '1'; // Normal size
+    if (wordLength <= 13) return '0.85'; // Slightly smaller
+    if (wordLength <= 18) return '0.7'; // Medium smaller
+    if (wordLength <= 23) return '0.6'; // Quite smaller
+    return '0.5'; // Very long words
+  })();
 </script>
 
 <div class="rsvp-display">
@@ -40,11 +52,11 @@
     style="opacity: {opacity}; transition: opacity {fadeEnabled ? fadeDuration : 0}ms ease-in-out;"
   >
     {#if currentWord}
-      <!-- ORP letter always centered at 50% -->
+      <!-- ORP letter always centered at 50% - ALWAYS FULL SIZE -->
       <span class="orp">{focusChar}</span>
 
       <!-- Content before ORP: prefix of current word + words before -->
-      <span class="before-orp" style="direction: {isRtl ? 'rtl' : 'ltr'}">
+      <span class="before-orp" style="direction: {isRtl ? 'rtl' : 'ltr'}; font-size: {dynamicFontSize}em; --scale: {dynamicFontSize};">
         {#if isRtl}
           {wordSuffix}{#if useMultiMode && wordsAfter.length > 0}
             &nbsp;<span class="context-words">{wordsAfter.join(' ')}</span>
@@ -57,7 +69,7 @@
       </span>
 
       <!-- Content after ORP: suffix of current word + words after -->
-      <span class="after-orp" style="direction: {isRtl ? 'rtl' : 'ltr'}">
+      <span class="after-orp" style="direction: {isRtl ? 'rtl' : 'ltr'}; font-size: {dynamicFontSize}em; --scale: {dynamicFontSize};">
         {#if isRtl}
           {#if useMultiMode && wordsBefore.length > 0}
             <span class="context-words">{wordsBefore.join(' ')}</span>&nbsp;
@@ -154,17 +166,19 @@
   .before-orp {
     position: absolute;
     left: 50%;
-    transform: translateX(calc(-100% - 0.5ch));
+    transform: translateX(calc(-100% - calc(0.5ch * var(--scale, 1))));
     color: #fff;
     /* direction: ltr; -- REMOVED to support dynamic RTL/LTR via inline style */
     text-align: right; /* Keeps text growing towards the center */
+    transform-origin: right center; /* Scale from the right edge towards ORP */
   }
 
   .after-orp {
     position: absolute;
-    left: calc(50% + 0.5ch);
+    left: calc(50% + calc(0.5ch * var(--scale, 1)));
     color: #fff;
     text-align: left;
+    transform-origin: left center; /* Scale from the left edge away from ORP */
   }
 
   .placeholder {

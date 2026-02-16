@@ -18,6 +18,15 @@ export function parseText(text) {
  * Based on word length, this determines which letter should be highlighted.
  * Supports all Unicode letters (Latin, Cyrillic, CJK, Arabic, etc.)
  *
+ * ORP Guidelines:
+ * - 1-3 letter words: 1st letter
+ * - 4-5 letter words: 2nd letter
+ * - 6-9 letter words: 3rd letter
+ * - 10-11 letter words: 4th letter
+ * - 12-14 letter words: 5th letter
+ * - 15-17 letter words: 6th letter
+ * - 18+ letter words: 7th letter
+ *
  * @param {string} word - The word to calculate ORP for
  * @returns {number} The index of the letter that should be highlighted
  */
@@ -25,11 +34,13 @@ export function getORPIndex(word) {
   if (!word || typeof word !== "string") return 0;
   const len = word.replace(/[^\p{L}]/gu, "").length;
   if (len <= 1) return 0;
-  if (len <= 3) return 0;
-  if (len <= 5) return 1;
-  if (len <= 9) return 2;
-  if (len <= 12) return 3;
-  return Math.floor(Math.log2(len - 1)) + 1;
+  if (len <= 3) return 0;  // 1-3 letters: 1st letter
+  if (len <= 5) return 1;  // 4-5 letters: 2nd letter
+  if (len <= 9) return 2;  // 6-9 letters: 3rd letter
+  if (len <= 11) return 3; // 10-11 letters: 4th letter
+  if (len <= 14) return 4; // 12-14 letters: 5th letter
+  if (len <= 17) return 5; // 15-17 letters: 6th letter
+  return 6;                // 18+ letters: 7th letter
 }
 
 /**

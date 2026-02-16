@@ -2,6 +2,8 @@
  * File parsing utilities for PDF and EPUB files
  */
 
+import { parseEPUBWithStructure } from './epub-structure-parser.js';
+
 /**
  * Parse a PDF file and extract its text content
  * @param {File} file - The PDF file to parse
@@ -98,15 +100,17 @@ function cleanText(text) {
 /**
  * Detect file type and parse accordingly
  * @param {File} file - The file to parse
- * @returns {Promise<string>} The extracted text
+ * @returns {Promise<{text: string, words?: string[], contentStructure?: Object}>} The parsed content
  */
 export async function parseFile(file) {
   const fileName = file.name.toLowerCase()
 
   if (fileName.endsWith('.pdf')) {
-    return parsePDF(file)
+    const text = await parsePDF(file);
+    return { text, contentStructure: null };
   } else if (fileName.endsWith('.epub')) {
-    return parseEPUB(file)
+    // Use structured parser for EPUBs to extract TOC and chapters
+    return await parseEPUBWithStructure(file);
   } else {
     throw new Error(`Unsupported file type: ${fileName}`)
   }

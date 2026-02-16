@@ -11,20 +11,29 @@
     saveSession,
     loadSession,
     clearSession,
-    hasSession,
-    getSessionSummary
+    hasSession
   } from './lib/progress-storage.js';
+  import {
+    getChapterAtWordIndex,
+    getWordIndexFromScroll,
+    getScrollPercentageInChapter
+  } from './lib/content-utils.js';
   import RSVPDisplay from './lib/components/RSVPDisplay.svelte';
+  import ReaderDisplay from './lib/components/ReaderDisplay.svelte';
+  import TOCPanel from './lib/components/TOCPanel.svelte';
   import Controls from './lib/components/Controls.svelte';
   import Settings from './lib/components/Settings.svelte';
   import TextInput from './lib/components/TextInput.svelte';
   import ProgressBar from './lib/components/ProgressBar.svelte';
   import { extractWordFrame } from './lib/rsvp-utils.js';
 
+  // Demo text constant
+  const DEMO_TEXT = `Rapid serial visual presentation (RSVP) is a scientific method for studying the timing of vision. In RSVP, a sequence of stimuli is shown to an observer at one location in their visual field. This technique has been adapted for speed reading applications, where words are displayed one at a time at a fixed point, eliminating the need for eye movements and potentially increasing reading speed significantly.`;
+
   // State
   let frameWordCount = 1;
-  let text = `Rapid serial visual presentation (RSVP) is a scientific method for studying the timing of vision. In RSVP, a sequence of stimuli is shown to an observer at one location in their visual field. This technique has been adapted for speed reading applications, where words are displayed one at a time at a fixed point, eliminating the need for eye movements and potentially increasing reading speed significantly.`;
-  let words = [];
+  let text = DEMO_TEXT;
+  let words = parseTextUtil(text); // Parse demo text immediately for new users
   let currentWordIndex = 0;
   let isPlaying = false;
   let isPaused = false;
@@ -35,8 +44,36 @@
   let loadingMessage = '';
   let showJumpTo = false;
   let jumpToValue = '';
-  let savedSessionInfo = null;
-  let showSavedSessionPrompt = false;
+
+  // Dual-mode state
+  let readingMode = 'rsvp'; // 'rsvp' | 'reader'
+  let contentStructure = null;
+  let currentChapterIndex = 0;
+  let readerScrollPosition = 0; // Percentage (0-100)
+  let showTOC = false;
+
+  // Reader mode auto-scroll
+  let readerAutoScroll = false;
+  let readerScrollIntervalId = null;
+
+  // Word highlight in reader mode (synced with RSVP position)
+  let highlightWordIndex = null;
+
+  // Device detection for platform-specific behavior
+  let isIOS = false;
+
+  function detectIOS() {
+    // Check if iOS (iPhone, iPad, iPod)
+    const userAgent = window.navigator.userAgent.toLowerCase();
+    return /iphone|ipad|ipod/.test(userAgent) ||
+           (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPad on iOS 13+
+  }
+
+  // Rewind button state
+  let isRewinding = false;
+  let rewindIntervalId = null;
+  let rewindStartTime = 0;
+  let rewindHoldTimeout = null;
 
   // Settings
   let wordsPerMinute = 300;
@@ -46,18 +83,30 @@
   let pauseDuration = 500;
   let pauseOnPunctuation = true;
   let punctuationPauseMultiplier = 2;
-  let wordLengthWPMMultiplier = 5;
+  let wordLengthWPMMultiplier = 50;
 
   // Animation
   let wordOpacity = 1;
   let intervalId = null;
   let fadeTimeoutId = null;
+  let autoSaveIntervalId = null;
 
   // Derived state
   $: currentWord = words[currentWordIndex - 1] || (words.length > 0 ? words[0] : '');
   $: wordFrame = extractWordFrame(words, Math.max(0, currentWordIndex - 1), frameWordCount);
   $: timeRemaining = formatTimeRemaining(words.length - currentWordIndex, wordsPerMinute);
   $: isFocusMode = isPlaying || isPaused;
+
+  // Chapter progress calculation
+  $: chapterProgress = (() => {
+    if (!contentStructure || !contentStructure.chapters.length) return 0;
+    const chapter = contentStructure.chapters[currentChapterIndex];
+    if (!chapter) return 0;
+    const chapterWordCount = chapter.endWordIndex - chapter.startWordIndex;
+    if (chapterWordCount === 0) return 0;
+    const wordOffset = currentWordIndex - chapter.startWordIndex;
+    return Math.min(100, Math.max(0, (wordOffset / chapterWordCount) * 100));
+  })();
 
   function parseText() {
     words = parseTextUtil(text);
@@ -95,6 +144,16 @@
 
     progress = ((currentWordIndex + 1) / words.length) * 100;
     currentWordIndex++;
+
+    // Update highlight in reader mode if needed
+    if (readingMode === 'reader' && contentStructure) {
+      highlightWordIndex = currentWordIndex;
+      // Only log occasionally to avoid spam
+      if (currentWordIndex % 50 === 0) {
+        console.log('[RSVP Update] Word', currentWordIndex, ':', words[currentWordIndex - 1]);
+      }
+    }
+
     scheduleNextWord();
   }
 
@@ -112,6 +171,7 @@
     showSettings = false;
     showTextInput = false;
     showNextWord();
+    startAutoSave();
   }
 
   function pause() {
@@ -121,6 +181,9 @@
       clearTimeout(intervalId);
       intervalId = null;
     }
+    stopAutoSave();
+    // Save when pausing
+    saveCurrentSession();
   }
 
   function resume() {
@@ -128,24 +191,255 @@
       isPlaying = true;
       isPaused = false;
       scheduleNextWord();
+      startAutoSave();
     }
   }
 
   function stop() {
     isPlaying = false;
     isPaused = false;
-    currentWordIndex = 0;
-    progress = 0;
     wordOpacity = 1;
     if (intervalId) {
       clearTimeout(intervalId);
       intervalId = null;
     }
+    stopAutoSave();
+    // Save one final time when stopping
+    saveCurrentSession();
+    // Position is preserved - only stop playback
   }
 
   function restart() {
+    // Reset position to beginning
+    currentWordIndex = 0;
+    progress = 0;
     stop();
     start();
+  }
+
+  // Mode switching and reader controls
+  function switchReadingMode(newMode) {
+    if (newMode === readingMode) return;
+    if (!contentStructure && newMode === 'reader') return; // Can't switch to reader without structure
+
+    // Pause any playback
+    if (isPlaying) pause();
+    if (readerAutoScroll) stopReaderAutoScroll();
+
+    if (readingMode === 'rsvp' && newMode === 'reader') {
+      // RSVP → Reader: Map word index to chapter + scroll position
+      currentChapterIndex = getChapterAtWordIndex(contentStructure, currentWordIndex);
+      const chapter = contentStructure.chapters[currentChapterIndex];
+      readerScrollPosition = getScrollPercentageInChapter(chapter, currentWordIndex);
+
+      // Highlight the current word in reader mode
+      highlightWordIndex = currentWordIndex;
+      console.log('[Mode Switch] RSVP→Reader. Current word:', words[currentWordIndex - 1], 'at index:', currentWordIndex);
+      console.log('[Mode Switch] Chapter:', chapter.title, 'Chapter word range:', chapter.startWordIndex, '-', chapter.endWordIndex);
+    } else if (readingMode === 'reader' && newMode === 'rsvp') {
+      // iOS: Keep current RSVP word position (scroll doesn't affect position)
+      // Desktop: Update word position from scroll (scroll does affect position)
+      if (!isIOS) {
+        const chapter = contentStructure.chapters[currentChapterIndex];
+        currentWordIndex = getWordIndexFromScroll(chapter, readerScrollPosition);
+      }
+      progress = (currentWordIndex / words.length) * 100;
+
+      // Clear any highlight when switching away
+      highlightWordIndex = null;
+    }
+
+    readingMode = newMode;
+
+    // Auto-play when switching to RSVP mode
+    if (newMode === 'rsvp') {
+      start();
+    }
+  }
+
+  function handleTOCNavigate(event) {
+    const { chapter, index } = event.detail;
+    currentChapterIndex = index;
+
+    if (readingMode === 'rsvp') {
+      // Jump to chapter start in RSVP mode
+      currentWordIndex = chapter.startWordIndex;
+      progress = (currentWordIndex / words.length) * 100;
+    } else {
+      // Scroll to top of chapter in reader mode
+      readerScrollPosition = 0;
+    }
+
+    showTOC = false;
+  }
+
+  function handleReaderScroll(event) {
+    readerScrollPosition = event.detail.percentage;
+
+    // iOS: Don't update word position from scroll (prevents getting off track)
+    // Desktop: Update word position from scroll (better UX for mouse users)
+    if (!isIOS && readingMode === 'reader' && contentStructure && !isPlaying) {
+      const chapter = contentStructure.chapters[currentChapterIndex];
+      const newWordIndex = getWordIndexFromScroll(chapter, readerScrollPosition);
+      if (newWordIndex !== currentWordIndex) {
+        currentWordIndex = newWordIndex;
+        highlightWordIndex = currentWordIndex;
+        progress = (currentWordIndex / words.length) * 100;
+      }
+    }
+  }
+
+  function handleReaderChapterChange(event) {
+    currentChapterIndex = event.detail.index;
+    readerScrollPosition = 0;
+    // Save chapter changes immediately
+    saveCurrentSession();
+  }
+
+  function handleReaderWordClick(event) {
+    const clickedWordIndex = event.detail.wordIndex;
+    console.log('[App] Word clicked in reader, setting RSVP position to:', clickedWordIndex);
+
+    // Update RSVP position
+    currentWordIndex = clickedWordIndex;
+    progress = (currentWordIndex / words.length) * 100;
+
+    // Update highlight
+    if (readingMode === 'reader') {
+      highlightWordIndex = currentWordIndex;
+    }
+  }
+
+  function startReaderAutoScroll() {
+    readerAutoScroll = true;
+    isPlaying = true;
+    isPaused = false;
+    startAutoSave();
+  }
+
+  function stopReaderAutoScroll() {
+    readerAutoScroll = false;
+    if (readerScrollIntervalId) {
+      clearInterval(readerScrollIntervalId);
+      readerScrollIntervalId = null;
+    }
+    stopAutoSave();
+    saveCurrentSession();
+  }
+
+  function toggleReaderAutoScroll() {
+    if (readerAutoScroll) {
+      stopReaderAutoScroll();
+      isPlaying = false;
+    } else {
+      startReaderAutoScroll();
+    }
+  }
+
+  // Rewind button functions
+  let wasHoldDown = false;
+
+  function startRewind(event) {
+    event.preventDefault(); // Prevent iOS touch scrolling
+
+    // Pause playback during rewind
+    if (isPlaying) {
+      pause();
+    }
+
+    if (currentWordIndex === 0) return; // Already at beginning
+
+    isRewinding = true;
+    rewindStartTime = Date.now();
+    wasHoldDown = false;
+
+    // Single click fallback - go back 1 word if released quickly
+    rewindHoldTimeout = setTimeout(() => {
+      // User is holding - start progressive rewind
+      wasHoldDown = true;
+      startProgressiveRewind();
+    }, 200);
+  }
+
+  function startProgressiveRewind() {
+    // Clear single-click timeout
+    if (rewindHoldTimeout) {
+      clearTimeout(rewindHoldTimeout);
+      rewindHoldTimeout = null;
+    }
+
+    // Initial rewind step
+    rewindByAmount(1);
+
+    // Start interval-based rewind with dynamic speed
+    const updateRewindSpeed = () => {
+      const elapsed = Date.now() - rewindStartTime;
+      const intervalMs = getIntervalForSpeed(elapsed);
+
+      if (rewindIntervalId) {
+        clearInterval(rewindIntervalId);
+      }
+
+      rewindIntervalId = setInterval(() => {
+        rewindByAmount(1);
+      }, intervalMs);
+    };
+
+    updateRewindSpeed();
+
+    // Update speed every 500ms as user continues holding
+    const speedUpdateInterval = setInterval(() => {
+      if (!isRewinding) {
+        clearInterval(speedUpdateInterval);
+        return;
+      }
+      updateRewindSpeed();
+    }, 500);
+  }
+
+  function getIntervalForSpeed(elapsed) {
+    if (elapsed < 500) return 200;  // 5 words/sec
+    if (elapsed < 1000) return 133; // 7.5 words/sec
+    return 100;                     // 10 words/sec (max)
+  }
+
+  function rewindByAmount(amount) {
+    currentWordIndex = Math.max(0, currentWordIndex - amount);
+    progress = (currentWordIndex / words.length) * 100;
+
+    // Stop if at beginning
+    if (currentWordIndex === 0) {
+      stopRewind();
+    }
+  }
+
+  function stopRewind() {
+    // Handle single click (released within 200ms)
+    if (rewindHoldTimeout && isRewinding) {
+      clearTimeout(rewindHoldTimeout);
+      rewindHoldTimeout = null;
+      // Quick tap - go back 1 word
+      rewindByAmount(1);
+      // Single click = stay paused, don't resume
+    } else if (wasHoldDown) {
+      // Hold-down = always resume playback on release
+      resume();
+    }
+
+    isRewinding = false;
+    wasHoldDown = false;
+
+    // Clear progressive rewind interval
+    if (rewindIntervalId) {
+      clearInterval(rewindIntervalId);
+      rewindIntervalId = null;
+    }
+
+    // Clear timeout if still pending
+    if (rewindHoldTimeout) {
+      clearTimeout(rewindHoldTimeout);
+      rewindHoldTimeout = null;
+    }
   }
 
   function handleTextApply(event) {
@@ -163,11 +457,28 @@
     loadingMessage = `Loading ${file.name}...`;
 
     try {
-      text = await parseFile(file);
+      const result = await parseFile(file);
+
+      // Handle structured content (EPUB with TOC) or plain text (PDF)
+      if (result.contentStructure) {
+        text = result.text;
+        words = result.words || parseTextUtil(result.text);
+        contentStructure = result.contentStructure;
+      } else {
+        text = result.text;
+        words = parseTextUtil(result.text);
+        contentStructure = null;
+      }
+
       stop();
-      parseText();
       showTextInput = false;
       loadingMessage = '';
+
+      // Initialize positions
+      currentWordIndex = 0;
+      currentChapterIndex = 0;
+      readerScrollPosition = 0;
+      progress = 0;
     } catch (error) {
       console.error('Error parsing file:', error);
       loadingMessage = `Error: ${error.message}`;
@@ -179,10 +490,15 @@
 
   function saveCurrentSession() {
     if (words.length === 0) return false;
+
     return saveSession({
       text,
       currentWordIndex,
       totalWords: words.length,
+      readingMode,
+      currentChapterIndex,
+      readerScrollPosition,
+      contentStructure,
       settings: {
         wordsPerMinute,
         fadeEnabled,
@@ -197,14 +513,42 @@
     });
   }
 
-  function loadSavedSession() {
-    const session = loadSession();
+  async function loadSavedSession() {
+    const session = await loadSession();
     if (!session) return false;
 
+    // Check if this is a minimal session (text was too large to save)
+    if (session.textTooLarge) {
+      console.warn('Saved session contains position only (text was too large)');
+      return false;
+    }
+
+    // Validate session has actual content before overwriting demo text
+    if (!session.text || session.text.trim().length === 0) {
+      console.warn('Saved session has empty text, keeping demo text');
+      return false;
+    }
+
     text = session.text;
-    parseText();
-    currentWordIndex = session.currentWordIndex;
+    words = parseTextUtil(text);
+
+    // Validate parsed words
+    if (!words || words.length === 0) {
+      console.error('Failed to parse saved session text, keeping demo text');
+      // Restore demo text
+      text = DEMO_TEXT;
+      words = parseTextUtil(text);
+      return false;
+    }
+
+    currentWordIndex = session.currentWordIndex || 0;
     progress = (currentWordIndex / words.length) * 100;
+
+    // Load dual-mode state
+    readingMode = session.readingMode || 'rsvp';
+    currentChapterIndex = session.currentChapterIndex || 0;
+    readerScrollPosition = session.readerScrollPosition || 0;
+    contentStructure = session.contentStructure || null;
 
     if (session.settings) {
       wordsPerMinute = session.settings.wordsPerMinute ?? wordsPerMinute;
@@ -218,14 +562,7 @@
       frameWordCount = session.settings.frameWordCount ?? frameWordCount;
     }
 
-    showSavedSessionPrompt = false;
     return true;
-  }
-
-  function clearSavedSession() {
-    clearSession();
-    showSavedSessionPrompt = false;
-    savedSessionInfo = null;
   }
 
   function jumpToWord(value) {
@@ -268,26 +605,48 @@
     switch (e.code) {
       case 'Space':
         e.preventDefault();
-        if (isPlaying) pause();
-        else if (isPaused) resume();
-        else start();
+        if (readingMode === 'reader') {
+          toggleReaderAutoScroll();
+        } else {
+          if (isPlaying) pause();
+          else if (isPaused) resume();
+          else start();
+        }
         break;
       case 'Escape':
-        if (showJumpTo) {
+        if (showTOC) {
+          showTOC = false;
+        } else if (showJumpTo) {
           showJumpTo = false;
           jumpToValue = '';
         } else if (showSettings || showTextInput) {
           showSettings = false;
           showTextInput = false;
-        } else if (showSavedSessionPrompt) {
-          showSavedSessionPrompt = false;
-        } else if (isPlaying || isPaused) {
+        } else if (isPlaying || isPaused || readerAutoScroll) {
           // Exit focus mode but preserve position
           isPlaying = false;
           isPaused = false;
+          readerAutoScroll = false;
           if (intervalId) {
             clearTimeout(intervalId);
             intervalId = null;
+          }
+        }
+        break;
+      case 'KeyM':
+        if (!isPlaying && contentStructure) {
+          e.preventDefault();
+          switchReadingMode(readingMode === 'rsvp' ? 'reader' : 'rsvp');
+        }
+        break;
+      case 'KeyT':
+        if (!isPlaying && contentStructure?.hasStructure) {
+          e.preventDefault();
+          showTOC = !showTOC;
+          if (showTOC) {
+            showSettings = false;
+            showTextInput = false;
+            showJumpTo = false;
           }
         }
         break;
@@ -295,6 +654,9 @@
         if (!isPlaying && !showSettings && !showTextInput) {
           e.preventDefault();
           showJumpTo = !showJumpTo;
+          if (showJumpTo) {
+            showTOC = false;
+          }
         }
         break;
       case 'KeyS':
@@ -328,23 +690,103 @@
     }
   }
 
-  onMount(() => {
-    parseText();
+  // Periodic auto-save while reading (every 10 seconds)
+  function startAutoSave() {
+    // Clear any existing interval
+    stopAutoSave();
+    // Save immediately
+    const saved = saveCurrentSession();
+    console.log('[Auto-save started]', saved ? 'Initial save successful' : 'Initial save failed');
+    // Then save every 10 seconds while playing
+    autoSaveIntervalId = setInterval(() => {
+      const saved = saveCurrentSession();
+      console.log('[Auto-save]', new Date().toLocaleTimeString(), saved ? 'Success' : 'Failed');
+    }, 10000); // 10 seconds
+  }
+
+  function stopAutoSave() {
+    if (autoSaveIntervalId) {
+      clearInterval(autoSaveIntervalId);
+      autoSaveIntervalId = null;
+    }
+  }
+
+  // Auto-save handlers for iOS backgrounding
+  function handleVisibilityChange() {
+    if (document.hidden) {
+      // Page is being hidden (user switched apps, locked screen, etc.)
+      console.log('[Page hidden] Saving session...');
+      const saved = saveCurrentSession();
+      console.log('[Page hidden] Save result:', saved);
+      stopAutoSave();
+    } else {
+      // Page is becoming visible again
+      console.log('[Page visible] Checking for session...');
+      if (isPlaying && !isPaused) {
+        startAutoSave();
+      }
+    }
+  }
+
+  function handleBeforeUnload() {
+    // Page is being unloaded
+    saveCurrentSession();
+    stopAutoSave();
+  }
+
+  function handlePageHide() {
+    // iOS Safari specific - page is being hidden
+    saveCurrentSession();
+    stopAutoSave();
+  }
+
+  onMount(async () => {
     window.addEventListener('keydown', handleKeydown);
 
-    // Check for saved session
-    if (hasSession()) {
-      savedSessionInfo = getSessionSummary();
-      if (savedSessionInfo) {
-        showSavedSessionPrompt = true;
+    // Auto-save event listeners for iOS backgrounding/app switching
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
+
+    // Detect device
+    isIOS = detectIOS();
+    console.log('[Device] iOS detected:', isIOS);
+
+    // Debug: Log mount time and check for saved session
+    console.log('[App Mount]', new Date().toLocaleTimeString());
+    console.log('[localStorage available]', typeof(Storage) !== 'undefined');
+    console.log('[IndexedDB available]', typeof(indexedDB) !== 'undefined');
+
+    // Demo text is already loaded and ready for immediate use
+    // Now check for saved session and load it if available (will overwrite demo text)
+    const sessionExists = await hasSession();
+    if (sessionExists) {
+      console.log('[Found saved session] Attempting to load...');
+      const loaded = await loadSavedSession();
+      if (loaded) {
+        console.log('[Session loaded successfully]');
+      } else {
+        console.warn('[Session load failed] Demo text already available');
+        // Demo text is already loaded, no need to call parseText() again
       }
+    } else {
+      console.log('[No saved session] Demo text already loaded');
+      // Demo text is already loaded, ready to use
     }
   });
 
   onDestroy(() => {
     if (intervalId) clearTimeout(intervalId);
     if (fadeTimeoutId) clearTimeout(fadeTimeoutId);
+    if (rewindIntervalId) clearInterval(rewindIntervalId);
+    if (rewindHoldTimeout) clearTimeout(rewindHoldTimeout);
+    stopAutoSave();
     window.removeEventListener('keydown', handleKeydown);
+
+    // Remove auto-save listeners
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+    window.removeEventListener('pagehide', handlePageHide);
   });
 </script>
 
@@ -354,9 +796,37 @@
     <header>
       <h1>RSVP Reader</h1>
       <div class="header-actions">
+        <!-- Mode toggle button (only if structured content) -->
+        {#if contentStructure}
+          <button
+            class="icon-btn"
+            on:click={() => switchReadingMode(readingMode === 'rsvp' ? 'reader' : 'rsvp')}
+            title={readingMode === 'rsvp' ? 'Switch to Reader Mode (M)' : 'Switch to RSVP Mode (M)'}
+            class:active={readingMode === 'reader'}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/>
+            </svg>
+          </button>
+        {/if}
+
+        <!-- TOC button (only if TOC exists) -->
+        {#if contentStructure?.hasStructure}
+          <button
+            class="icon-btn"
+            on:click={() => { showTOC = !showTOC; showSettings = false; showTextInput = false; showJumpTo = false; }}
+            title="Table of Contents (T)"
+            class:active={showTOC}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3 9h14V7H3v2zm0 4h14v-2H3v2zm0 4h14v-2H3v2zm16 0h2v-2h-2v2zm0-10v2h2V7h-2zm0 6h2v-2h-2v2z"/>
+            </svg>
+          </button>
+        {/if}
+
         <button
           class="icon-btn"
-          on:click={() => { showJumpTo = !showJumpTo; showSettings = false; showTextInput = false; }}
+          on:click={() => { showJumpTo = !showJumpTo; showSettings = false; showTextInput = false; showTOC = false; }}
           title="Jump to word (G)"
           class:active={showJumpTo}
         >
@@ -376,7 +846,7 @@
         </button>
         <button
           class="icon-btn"
-          on:click={() => { showTextInput = !showTextInput; showSettings = false; showJumpTo = false; }}
+          on:click={() => { showTextInput = !showTextInput; showSettings = false; showJumpTo = false; showTOC = false; }}
           title="Load Content"
           class:active={showTextInput}
         >
@@ -386,7 +856,7 @@
         </button>
         <button
           class="icon-btn"
-          on:click={() => { showSettings = !showSettings; showTextInput = false; showJumpTo = false; }}
+          on:click={() => { showSettings = !showSettings; showTextInput = false; showJumpTo = false; showTOC = false; }}
           title="Settings"
           class:active={showSettings}
         >
@@ -458,32 +928,134 @@
     </div>
   {/if}
 
-  {#if showSavedSessionPrompt && savedSessionInfo}
-    <div class="panel-overlay">
-      <div class="saved-session-panel">
-        <h3>Resume reading?</h3>
-        <p>You have a saved session at word {savedSessionInfo.currentWordIndex} of {savedSessionInfo.totalWords}</p>
-        <p class="saved-time">Saved {new Date(savedSessionInfo.savedAt).toLocaleString()}</p>
-        <div class="session-actions">
-          <button class="secondary" on:click={clearSavedSession}>Start Fresh</button>
-          <button class="primary" on:click={loadSavedSession}>Resume</button>
-        </div>
-      </div>
+  {#if showTOC && contentStructure && !isFocusMode}
+    <div class="panel-overlay" on:click|self={() => showTOC = false} role="presentation">
+      <TOCPanel
+        toc={contentStructure.toc}
+        {currentChapterIndex}
+        on:navigate={handleTOCNavigate}
+        on:close={() => showTOC = false}
+      />
     </div>
   {/if}
 
   <!-- Main Display -->
   <div class="display-area">
-    <RSVPDisplay
-      word={currentWord}
-      wordGroup={wordFrame.subset}
-      highlightIndex={wordFrame.centerOffset}
-      opacity={wordOpacity}
-      {fadeDuration}
-      {fadeEnabled}
-      multiWordEnabled={frameWordCount > 1}
-    />
+    {#if readingMode === 'rsvp'}
+      <RSVPDisplay
+        word={currentWord}
+        wordGroup={wordFrame.subset}
+        highlightIndex={wordFrame.centerOffset}
+        opacity={wordOpacity}
+        {fadeDuration}
+        {fadeEnabled}
+        multiWordEnabled={frameWordCount > 1}
+      />
+    {:else if readingMode === 'reader' && contentStructure}
+      <ReaderDisplay
+        chapter={contentStructure.chapters[currentChapterIndex]}
+        {contentStructure}
+        {currentChapterIndex}
+        scrollPosition={readerScrollPosition}
+        autoScroll={readerAutoScroll}
+        scrollSpeed={wordsPerMinute}
+        {highlightWordIndex}
+        on:scroll={handleReaderScroll}
+        on:chapterChange={handleReaderChapterChange}
+        on:wordClick={handleReaderWordClick}
+      />
+    {:else}
+      <div class="no-content">
+        <p>Load an EPUB file to use reader mode</p>
+      </div>
+    {/if}
   </div>
+
+  <!-- Floating Rewind Button (only in RSVP focus mode) -->
+  {#if isFocusMode && readingMode === 'rsvp' && words.length > 0}
+    <button
+      class="rewind-button"
+      class:rewinding={isRewinding}
+      on:touchstart={startRewind}
+      on:touchend={stopRewind}
+      on:touchcancel={stopRewind}
+      on:mousedown={startRewind}
+      on:mouseup={stopRewind}
+      on:mouseleave={stopRewind}
+      disabled={currentWordIndex === 0}
+      title="Hold to rewind"
+      aria-label="Rewind"
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+        <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/>
+      </svg>
+    </button>
+  {/if}
+
+  <!-- Speed Control Buttons (only in RSVP focus mode) -->
+  {#if isFocusMode && readingMode === 'rsvp'}
+    <div class="speed-controls">
+      <button
+        class="speed-btn"
+        on:click={() => wordsPerMinute = Math.max(50, wordsPerMinute - 25)}
+        title="Decrease speed"
+        aria-label="Decrease speed"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+          <path d="M19 13H5v-2h14v2z"/>
+        </svg>
+      </button>
+      <div class="speed-display">
+        <span class="speed-value">{wordsPerMinute}</span>
+        <span class="speed-label">WPM</span>
+      </div>
+      <button
+        class="speed-btn"
+        on:click={() => wordsPerMinute = Math.min(1000, wordsPerMinute + 25)}
+        title="Increase speed"
+        aria-label="Increase speed"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+      </button>
+    </div>
+  {/if}
+
+  <!-- Floating Mode Toggle Button (only when content structure exists) -->
+  {#if contentStructure && (isFocusMode || readingMode === 'reader')}
+    <button
+      class="mode-toggle-button"
+      on:click={() => switchReadingMode(readingMode === 'rsvp' ? 'reader' : 'rsvp')}
+      title={readingMode === 'rsvp' ? 'Switch to Reader Mode' : 'Switch to RSVP Mode'}
+      aria-label={readingMode === 'rsvp' ? 'Switch to Reader Mode' : 'Switch to RSVP Mode'}
+    >
+      {#if readingMode === 'rsvp'}
+        <!-- Book icon for switching to reader mode -->
+        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+          <path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/>
+        </svg>
+      {:else}
+        <!-- Eye/RSVP icon for switching to RSVP mode -->
+        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+          <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+        </svg>
+      {/if}
+    </button>
+  {/if}
+
+  <!-- Chapter Progress Bar (only when chapter structure exists) -->
+  {#if isFocusMode && contentStructure && contentStructure.chapters.length > 0}
+    <div class="chapter-progress-container">
+      <div class="chapter-progress-info">
+        <span class="chapter-title">{contentStructure.chapters[currentChapterIndex]?.title || 'Chapter'}</span>
+        <span class="chapter-percentage">{Math.round(chapterProgress)}%</span>
+      </div>
+      <div class="chapter-progress-bar">
+        <div class="chapter-progress-fill" style="width: {chapterProgress}%"></div>
+      </div>
+    </div>
+  {/if}
 
   <!-- Bottom Bar -->
   <div class="bottom-bar" class:minimal={isFocusMode}>
@@ -504,9 +1076,10 @@
         {isPaused}
         canPlay={words.length > 0}
         minimal={isFocusMode}
-        on:play={start}
-        on:pause={pause}
-        on:resume={resume}
+        showRestart={readingMode === 'rsvp'}
+        on:play={readingMode === 'reader' ? toggleReaderAutoScroll : start}
+        on:pause={readingMode === 'reader' ? toggleReaderAutoScroll : pause}
+        on:resume={readingMode === 'reader' ? toggleReaderAutoScroll : resume}
         on:stop={stop}
         on:restart={restart}
       />
@@ -514,10 +1087,18 @@
 
     {#if !isFocusMode}
       <div class="shortcuts desktop-only">
-        <kbd>Space</kbd> Play
+        <kbd>Space</kbd> {readingMode === 'reader' ? 'Scroll' : 'Play'}
         <kbd>Esc</kbd> Exit
-        <kbd>↑↓</kbd> Speed
-        <kbd>←→</kbd> Skip
+        {#if readingMode === 'rsvp'}
+          <kbd>↑↓</kbd> Speed
+          <kbd>←→</kbd> Skip
+        {/if}
+        {#if contentStructure}
+          <kbd>M</kbd> Mode
+        {/if}
+        {#if contentStructure?.hasStructure}
+          <kbd>T</kbd> TOC
+        {/if}
         <kbd>G</kbd> Jump
         <kbd>Ctrl+S</kbd> Save
       </div>
@@ -750,8 +1331,7 @@
   }
 
   /* Jump to panel */
-  .jump-to-panel,
-  .saved-session-panel {
+  .jump-to-panel {
     background: #1a1a1a;
     border: 1px solid #333;
     border-radius: 12px;
@@ -760,8 +1340,7 @@
     width: 100%;
   }
 
-  .jump-to-panel h3,
-  .saved-session-panel h3 {
+  .jump-to-panel h3 {
     margin: 0 0 0.5rem 0;
     color: #fff;
     font-size: 1.1rem;
@@ -790,15 +1369,13 @@
     border-color: #ff4444;
   }
 
-  .jump-actions,
-  .session-actions {
+  .jump-actions {
     display: flex;
     gap: 0.5rem;
     justify-content: flex-end;
   }
 
-  .jump-actions button,
-  .session-actions button {
+  .jump-actions button {
     padding: 0.5rem 1rem;
     border-radius: 6px;
     border: none;
@@ -807,25 +1384,21 @@
     transition: all 0.2s;
   }
 
-  .jump-actions button.primary,
-  .session-actions button.primary {
+  .jump-actions button.primary {
     background: #ff4444;
     color: #fff;
   }
 
-  .jump-actions button.primary:hover,
-  .session-actions button.primary:hover {
+  .jump-actions button.primary:hover {
     background: #ff6666;
   }
 
-  .jump-actions button.secondary,
-  .session-actions button.secondary {
+  .jump-actions button.secondary {
     background: #333;
     color: #fff;
   }
 
-  .jump-actions button.secondary:hover,
-  .session-actions button.secondary:hover {
+  .jump-actions button.secondary:hover {
     background: #444;
   }
 
@@ -854,19 +1427,300 @@
     color: #fff;
   }
 
-  .saved-session-panel p {
-    margin: 0.5rem 0;
-    color: #ccc;
-  }
-
-  .saved-session-panel .saved-time {
-    color: #666;
-    font-size: 0.85rem;
-    margin-bottom: 1rem;
-  }
-
   .icon-btn:disabled {
     opacity: 0.3;
     cursor: not-allowed;
+  }
+
+  .no-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #555;
+    font-size: 1.2rem;
+  }
+
+  /* Rewind Button */
+  .rewind-button {
+    position: fixed;
+    left: 2rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(26, 26, 26, 0.9);
+    border: 2px solid #333;
+    color: #fff;
+    cursor: pointer;
+    z-index: 50;
+    transition: all 0.2s ease;
+    opacity: 0.7;
+    touch-action: manipulation; /* Prevent iOS double-tap zoom */
+    -webkit-tap-highlight-color: transparent; /* Remove iOS tap highlight */
+    -webkit-user-select: none; /* Prevent text selection */
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .rewind-button:hover:not(:disabled) {
+    opacity: 1;
+    border-color: #ff4444;
+  }
+
+  .rewind-button.rewinding {
+    opacity: 1;
+    border-color: #ff4444;
+    animation: rewind-pulse 0.5s ease-in-out infinite;
+  }
+
+  @keyframes rewind-pulse {
+    0%, 100% {
+      transform: translateY(-50%) scale(1);
+    }
+    50% {
+      transform: translateY(-50%) scale(1.1);
+    }
+  }
+
+  .rewind-button:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  /* Mobile adjustments */
+  @media (max-width: 600px) {
+    .rewind-button {
+      left: 1rem;
+      width: 48px;
+      height: 48px;
+    }
+
+    .rewind-button svg {
+      width: 20px;
+      height: 20px;
+    }
+  }
+
+  /* Speed Controls */
+  .speed-controls {
+    position: fixed;
+    bottom: 8rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: rgba(26, 26, 26, 0.95);
+    border: 2px solid #333;
+    border-radius: 50px;
+    padding: 0.5rem 1rem;
+    z-index: 50;
+    backdrop-filter: blur(10px);
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+  }
+
+  .speed-controls:hover {
+    opacity: 1;
+  }
+
+  .speed-btn {
+    background: transparent;
+    border: 1px solid #333;
+    color: #fff;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .speed-btn:hover {
+    background: #222;
+    border-color: #ff4444;
+  }
+
+  .speed-btn:active {
+    transform: scale(0.95);
+  }
+
+  .speed-display {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 60px;
+    padding: 0 0.5rem;
+  }
+
+  .speed-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #ff4444;
+    font-family: 'SF Mono', 'Monaco', monospace;
+    line-height: 1;
+  }
+
+  .speed-label {
+    font-size: 0.65rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 0.125rem;
+  }
+
+  @media (max-width: 600px) {
+    .speed-controls {
+      bottom: 7rem;
+      padding: 0.375rem 0.75rem;
+      gap: 0.5rem;
+    }
+
+    .speed-btn {
+      width: 32px;
+      height: 32px;
+    }
+
+    .speed-btn svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    .speed-display {
+      min-width: 50px;
+      padding: 0 0.25rem;
+    }
+
+    .speed-value {
+      font-size: 1.1rem;
+    }
+
+    .speed-label {
+      font-size: 0.6rem;
+    }
+  }
+
+  /* Mode Toggle Button */
+  .mode-toggle-button {
+    position: fixed;
+    right: 2rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(26, 26, 26, 0.9);
+    border: 2px solid #333;
+    color: #fff;
+    cursor: pointer;
+    z-index: 50;
+    transition: all 0.2s ease;
+    opacity: 0.7;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mode-toggle-button:hover {
+    opacity: 1;
+    border-color: #ff4444;
+  }
+
+  @media (max-width: 600px) {
+    .mode-toggle-button {
+      right: 1rem;
+      width: 48px;
+      height: 48px;
+    }
+
+    .mode-toggle-button svg {
+      width: 20px;
+      height: 20px;
+    }
+  }
+
+  /* Chapter Progress Bar */
+  .chapter-progress-container {
+    position: fixed;
+    top: 1rem;
+    right: 2rem;
+    width: 250px;
+    background: rgba(26, 26, 26, 0.9);
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 0.75rem;
+    z-index: 50;
+    backdrop-filter: blur(10px);
+  }
+
+  .chapter-progress-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .chapter-title {
+    font-size: 0.75rem;
+    color: #ccc;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .chapter-percentage {
+    font-size: 0.75rem;
+    color: #ff4444;
+    font-weight: 600;
+    font-family: 'SF Mono', monospace;
+    flex-shrink: 0;
+  }
+
+  .chapter-progress-bar {
+    width: 100%;
+    height: 4px;
+    background: #333;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .chapter-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #ff4444, #ff6666);
+    border-radius: 2px;
+    transition: width 0.2s ease-out;
+  }
+
+  @media (max-width: 600px) {
+    .chapter-progress-container {
+      top: 1rem;
+      right: 1rem;
+      width: 200px;
+      padding: 0.5rem;
+    }
+
+    .chapter-title {
+      font-size: 0.7rem;
+    }
+
+    .chapter-percentage {
+      font-size: 0.7rem;
+    }
   }
 </style>

@@ -5,6 +5,7 @@
   export let isPaused = false;
   export let canPlay = true;
   export let minimal = false;
+  export let showRestart = true;
 
   const dispatch = createEventDispatcher();
 </script>
@@ -82,7 +83,7 @@
     {/if}
   </button>
 
-  {#if !minimal}
+  {#if !minimal && showRestart}
     <button
       class="control-btn restart"
       on:click={() => dispatch('restart')}
