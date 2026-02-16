@@ -39,6 +39,7 @@
   let isPaused = false;
   let showSettings = false;
   let showTextInput = false;
+  let textInputValue = ''; // Separate variable for text input modal (don't load entire book into textarea)
   let progress = 0;
   let isLoadingFile = false;
   let loadingMessage = '';
@@ -447,6 +448,7 @@
     stop();
     parseText();
     showTextInput = false;
+    textInputValue = ''; // Clear the input for next time
   }
 
   async function handleFileSelect(event) {
@@ -489,6 +491,7 @@
       wordOpacity = 1;
       showTextInput = false;
       loadingMessage = '';
+      textInputValue = ''; // Clear text input
 
       // Initialize positions
       currentWordIndex = 0;
@@ -874,12 +877,12 @@
   {#if showTextInput && !isFocusMode}
     <div class="panel-overlay">
       <TextInput
-        {text}
+        text={textInputValue}
         isLoading={isLoadingFile}
         {loadingMessage}
         on:apply={handleTextApply}
         on:fileselect={handleFileSelect}
-        on:close={() => showTextInput = false}
+        on:close={() => { showTextInput = false; textInputValue = ''; }}
       />
     </div>
   {/if}
