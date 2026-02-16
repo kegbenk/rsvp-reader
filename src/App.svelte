@@ -238,12 +238,8 @@
       console.log('[Mode Switch] RSVP→Reader. Current word:', words[currentWordIndex - 1], 'at index:', currentWordIndex);
       console.log('[Mode Switch] Chapter:', chapter.title, 'Chapter word range:', chapter.startWordIndex, '-', chapter.endWordIndex);
     } else if (readingMode === 'reader' && newMode === 'rsvp') {
-      // iOS: Keep current RSVP word position (scroll doesn't affect position)
-      // Desktop: Update word position from scroll (scroll does affect position)
-      if (!isIOS) {
-        const chapter = contentStructure.chapters[currentChapterIndex];
-        currentWordIndex = getWordIndexFromScroll(chapter, readerScrollPosition);
-      }
+      // Keep current RSVP word position when switching modes
+      // (scroll position is now decoupled from RSVP head position)
       progress = (currentWordIndex / words.length) * 100;
 
       // Clear any highlight when switching away
@@ -275,19 +271,13 @@
   }
 
   function handleReaderScroll(event) {
+    // Track scroll position for saving/restoring, but don't update RSVP head
     readerScrollPosition = event.detail.percentage;
 
-    // iOS: Don't update word position from scroll (prevents getting off track)
-    // Desktop: Update word position from scroll (better UX for mouse users)
-    if (!isIOS && readingMode === 'reader' && contentStructure && !isPlaying) {
-      const chapter = contentStructure.chapters[currentChapterIndex];
-      const newWordIndex = getWordIndexFromScroll(chapter, readerScrollPosition);
-      if (newWordIndex !== currentWordIndex) {
-        currentWordIndex = newWordIndex;
-        highlightWordIndex = currentWordIndex;
-        progress = (currentWordIndex / words.length) * 100;
-      }
-    }
+    // RSVP reader head position is now decoupled from scroll position
+    // It only updates via:
+    // 1. RSVP playback advancing
+    // 2. Clicking/tapping words in reader mode
   }
 
   function handleReaderChapterChange(event) {
