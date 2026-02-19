@@ -8,11 +8,19 @@
   export let fadeDuration = 150;
   export let fadeEnabled = true;
   export let multiWordEnabled = false;
+  export let isShowingImage = false;
+  export let currentImage = null;
 
   $: useMultiMode = multiWordEnabled && wordGroup.length > 0;
 
   // Get the current word (either from single mode or the highlighted word in group)
-  $: currentWord = useMultiMode ? (wordGroup[highlightIndex] || '') : word;
+  $: rawWord = useMultiMode ? (wordGroup[highlightIndex] || '') : word;
+
+  // Check if this is a line break marker (blank pause between paragraphs)
+  $: hasLineBreak = rawWord === '\n';
+
+  // Strip the first-word-after-break marker (⟩) if present
+  $: currentWord = hasLineBreak ? '' : (rawWord.startsWith('⟩') ? rawWord.substring(1) : rawWord);
 
   // Always calculate ORP for the current word
   $: orpIdx = currentWord ? getActualORPIndex(currentWord) : -1;
@@ -21,8 +29,9 @@
   $: wordSuffix = currentWord ? currentWord.slice(orpIdx + 1) : '';
 
   // Words before and after the highlighted word (for multi-word mode)
-  $: wordsBefore = useMultiMode ? wordGroup.slice(0, highlightIndex) : [];
-  $: wordsAfter = useMultiMode ? wordGroup.slice(highlightIndex + 1) : [];
+  // Filter out line break markers and strip ⟩ from context words
+  $: wordsBefore = useMultiMode ? wordGroup.slice(0, highlightIndex).filter(w => w !== '\n').map(w => w.startsWith('⟩') ? w.substring(1) : w) : [];
+  $: wordsAfter = useMultiMode ? wordGroup.slice(highlightIndex + 1).filter(w => w !== '\n').map(w => w.startsWith('⟩') ? w.substring(1) : w) : [];
 
   // FIX: Detect Hebrew, Arabic, and other RTL scripts
   $: isRtl = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/.test(currentWord);
@@ -41,49 +50,61 @@
 </script>
 
 <div class="rsvp-display">
-  <div class="focus-marker">
-    <div class="marker-line top"></div>
-    <div class="marker-line bottom"></div>
-  </div>
+  {#if isShowingImage && currentImage}
+    <!-- Image display mode -->
+    <div class="image-container">
+      <img src={currentImage.src} alt={currentImage.alt} />
+      {#if currentImage.alt}
+        <div class="image-caption">{currentImage.alt}</div>
+      {/if}
+    </div>
+  {:else}
+    <!-- Normal word display mode -->
+    <div class="focus-marker">
+      <div class="marker-line top"></div>
+      <div class="marker-line bottom"></div>
+    </div>
 
-  <div
-    class="word-container"
-    class:multi-mode={useMultiMode}
-    style="opacity: {opacity}; transition: opacity {fadeEnabled ? fadeDuration : 0}ms ease-in-out;"
-  >
-    {#if currentWord}
-      <!-- ORP letter always centered at 50% - ALWAYS FULL SIZE -->
-      <span class="orp">{focusChar}</span>
+    <div
+      class="word-container"
+      class:multi-mode={useMultiMode}
+      class:line-break-pause={hasLineBreak}
+      style="opacity: {hasLineBreak ? 0 : opacity}; transition: opacity {fadeEnabled ? fadeDuration : 0}ms ease-in-out;"
+    >
+      {#if currentWord || hasLineBreak}
+        <!-- ORP letter always centered at 50% - ALWAYS FULL SIZE -->
+        <span class="orp">{focusChar}</span>
 
-      <!-- Content before ORP: prefix of current word + words before -->
-      <span class="before-orp" style="direction: {isRtl ? 'rtl' : 'ltr'}; font-size: {dynamicFontSize}em; --scale: {dynamicFontSize};">
-        {#if isRtl}
-          {wordSuffix}{#if useMultiMode && wordsAfter.length > 0}
-            &nbsp;<span class="context-words">{wordsAfter.join(' ')}</span>
+        <!-- Content before ORP: prefix of current word + words before -->
+        <span class="before-orp" style="direction: {isRtl ? 'rtl' : 'ltr'}; font-size: {dynamicFontSize}em; --scale: {dynamicFontSize};">
+          {#if isRtl}
+            {wordSuffix}{#if useMultiMode && wordsAfter.length > 0}
+              &nbsp;<span class="context-words">{wordsAfter.join(' ')}</span>
+            {/if}
+          {:else}
+            {#if useMultiMode && wordsBefore.length > 0}
+              <span class="context-words">{wordsBefore.join(' ')}</span>&nbsp;
+            {/if}{wordPrefix}
           {/if}
-        {:else}
-          {#if useMultiMode && wordsBefore.length > 0}
-            <span class="context-words">{wordsBefore.join(' ')}</span>&nbsp;
-          {/if}{wordPrefix}
-        {/if}
-      </span>
+        </span>
 
-      <!-- Content after ORP: suffix of current word + words after -->
-      <span class="after-orp" style="direction: {isRtl ? 'rtl' : 'ltr'}; font-size: {dynamicFontSize}em; --scale: {dynamicFontSize};">
-        {#if isRtl}
-          {#if useMultiMode && wordsBefore.length > 0}
-            <span class="context-words">{wordsBefore.join(' ')}</span>&nbsp;
-          {/if}{wordPrefix}
-        {:else}
-          {wordSuffix}{#if useMultiMode && wordsAfter.length > 0}
-            &nbsp;<span class="context-words">{wordsAfter.join(' ')}</span>
+        <!-- Content after ORP: suffix of current word + words after -->
+        <span class="after-orp" style="direction: {isRtl ? 'rtl' : 'ltr'}; font-size: {dynamicFontSize}em; --scale: {dynamicFontSize};">
+          {#if isRtl}
+            {#if useMultiMode && wordsBefore.length > 0}
+              <span class="context-words">{wordsBefore.join(' ')}</span>&nbsp;
+            {/if}{wordPrefix}
+          {:else}
+            {wordSuffix}{#if useMultiMode && wordsAfter.length > 0}
+              &nbsp;<span class="context-words">{wordsAfter.join(' ')}</span>
+            {/if}
           {/if}
-        {/if}
-      </span>
-    {:else}
-      <span class="placeholder">Ready</span>
-    {/if}
-  </div>
+        </span>
+      {:else}
+        <span class="placeholder">Ready</span>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -126,6 +147,32 @@
     background: linear-gradient(to top, #ff4444, transparent);
   }
 
+  .image-container {
+    max-width: 90%;
+    max-height: 90%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+  }
+
+  .image-container img {
+    max-width: 100%;
+    max-height: 70vh;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  }
+
+  .image-caption {
+    color: #888;
+    font-size: 1rem;
+    text-align: center;
+    font-family: system-ui, -apple-system, sans-serif;
+    max-width: 80%;
+  }
+
   .word-container {
     position: relative;
     font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', 'Menlo', 'Consolas', monospace;
@@ -166,7 +213,7 @@
   .before-orp {
     position: absolute;
     left: 50%;
-    transform: translateX(calc(-100% - calc(0.5ch * var(--scale, 1))));
+    transform: translateX(calc(-100% - 0.65ch));
     color: #fff;
     /* direction: ltr; -- REMOVED to support dynamic RTL/LTR via inline style */
     text-align: right; /* Keeps text growing towards the center */
@@ -175,7 +222,7 @@
 
   .after-orp {
     position: absolute;
-    left: calc(50% + calc(0.5ch * var(--scale, 1)));
+    left: calc(50% + 0.65ch);
     color: #fff;
     text-align: left;
     transform-origin: left center; /* Scale from the left edge away from ORP */

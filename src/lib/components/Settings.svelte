@@ -6,10 +6,14 @@
   export let fadeDuration = 150;
   export let pauseOnPunctuation = true;
   export let punctuationPauseMultiplier = 2;
+  export let lineBreakPauseMultiplier = 3;
   export let pauseAfterWords = 0;
   export let pauseDuration = 500;
   export let frameWordCount = 1;
   export let wordLengthWPMMultiplier = 5;
+  export let showImagesInRSVP = true;
+  export let imageDurationSeconds = 3;
+  export let chapterProgressDisplayMode = 'timer'; // 'timer' or 'percentage'
 
   const dispatch = createEventDispatcher();
 
@@ -92,6 +96,55 @@
       <input type="range" min="1" max="7" step="2" bind:value={frameWordCount} class="slider">
       <p class="hint-text">Odd numbers (1, 3, 5, 7) center the highlight best</p>
     </div>
+
+    <div class="toggle-row">
+      <span class="toggle-label">Chapter progress: {chapterProgressDisplayMode === 'timer' ? 'Countdown' : 'Percentage'}</span>
+      <button
+        class="toggle"
+        class:active={chapterProgressDisplayMode === 'timer'}
+        on:click={() => chapterProgressDisplayMode = chapterProgressDisplayMode === 'timer' ? 'percentage' : 'timer'}
+        role="switch"
+        aria-checked={chapterProgressDisplayMode === 'timer'}
+        aria-label="Toggle chapter progress display mode"
+      >
+        <span class="toggle-thumb"></span>
+      </button>
+    </div>
+  </section>
+
+  <!-- Images Section -->
+  <section class="settings-section">
+    <div class="section-header">
+      <svg viewBox="0 0 24 24" fill="currentColor" class="section-icon">
+        <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+      </svg>
+      <span>Images</span>
+    </div>
+
+    <div class="toggle-row">
+      <span class="toggle-label">Show images in RSVP mode</span>
+      <button
+        class="toggle"
+        class:active={showImagesInRSVP}
+        on:click={() => showImagesInRSVP = !showImagesInRSVP}
+        role="switch"
+        aria-checked={showImagesInRSVP}
+        aria-label="Toggle images in RSVP mode"
+      >
+        <span class="toggle-thumb"></span>
+      </button>
+    </div>
+
+    {#if showImagesInRSVP}
+      <div class="sub-control">
+        <div class="control-header">
+          <span>Display duration</span>
+          <span class="control-value">{imageDurationSeconds}s</span>
+        </div>
+        <input type="range" min="1" max="10" step="0.5" bind:value={imageDurationSeconds} class="slider slider-sm">
+        <p class="hint-text">How long each image is shown before resuming</p>
+      </div>
+    {/if}
   </section>
 
   <!-- Effects Section -->
@@ -160,6 +213,15 @@
         <input type="range" min="1" max="4" step="0.5" bind:value={punctuationPauseMultiplier} class="slider slider-sm">
       </div>
     {/if}
+
+    <div class="control-row">
+      <div class="control-header">
+        <span>Pause on line breaks</span>
+        <span class="control-value">{lineBreakPauseMultiplier}x</span>
+      </div>
+      <input type="range" min="1" max="5" step="0.5" bind:value={lineBreakPauseMultiplier} class="slider">
+      <p class="hint-text">How long to pause after line breaks</p>
+    </div>
 
     <div class="control-row">
       <div class="control-header">

@@ -3,13 +3,38 @@
  */
 
 /**
- * Parse text into an array of words
+ * Parse text into an array of words, preserving line break information
+ * Words that follow line breaks are marked with a special suffix
  * @param {string} text - The input text to parse
- * @returns {string[]} Array of words
+ * @returns {string[]} Array of words (words after line breaks end with '\n')
  */
 export function parseText(text) {
   if (!text || typeof text !== "string") return [];
-  return text.trim().split(/\s+/).filter((w) => w.length > 0);
+
+  // Split by line breaks first to preserve line structure
+  const lines = text.split(/\n/);
+  const words = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.length === 0) continue;
+
+    const lineWords = line.split(/\s+/).filter(w => w.length > 0);
+
+    // Insert a blank marker between paragraphs (after the first paragraph)
+    if (words.length > 0 && lineWords.length > 0) {
+      words.push('\n'); // This will display as blank with a pause
+
+      // Mark the first word of the new paragraph so it displays longer
+      if (lineWords.length > 0) {
+        lineWords[0] = '⟩' + lineWords[0]; // ⟩ marker for first word after line break
+      }
+    }
+
+    words.push(...lineWords);
+  }
+
+  return words;
 }
 
 /**
@@ -23,7 +48,7 @@ export function parseText(text) {
  * - 4-5 letter words: 2nd letter
  * - 6-9 letter words: 3rd letter
  * - 10-11 letter words: 4th letter
- * - 12-14 letter words: 5th letter
+ * - 12-14 letters: 5th letter
  * - 15-17 letter words: 6th letter
  * - 18+ letter words: 7th letter
  *
@@ -32,7 +57,11 @@ export function parseText(text) {
  */
 export function getORPIndex(word) {
   if (!word || typeof word !== "string") return 0;
-  const len = word.replace(/[^\p{L}]/gu, "").length;
+
+  // Strip first-word-after-break marker if present
+  const cleanWord = word.startsWith('⟩') ? word.substring(1) : word;
+
+  const len = cleanWord.replace(/[^\p{L}]/gu, "").length;
   if (len <= 1) return 0;
   if (len <= 3) return 0;  // 1-3 letters: 1st letter
   if (len <= 5) return 1;  // 4-5 letters: 2nd letter
@@ -57,27 +86,32 @@ const unicodeLetterRegex = /\p{L}/u
 export function getActualORPIndex(word) {
   if (!word || typeof word !== "string") return 0;
 
-  const orpIndex = getORPIndex(word);
+  // Strip first-word-after-break marker if present
+  const cleanWord = word.startsWith('⟩') ? word.substring(1) : word;
+
+  const orpIndex = getORPIndex(cleanWord);
   let letterCount = 0;
 
-  for (let i = 0; i < word.length; i++) {
-    if (unicodeLetterRegex.test(word[i])) {
+  for (let i = 0; i < cleanWord.length; i++) {
+    if (unicodeLetterRegex.test(cleanWord[i])) {
       if (letterCount === orpIndex) return i
       letterCount++
     }
   }
 
-  return Math.min(orpIndex, word.length - 1);
+  return Math.min(orpIndex, cleanWord.length - 1);
 }
 
 /**
- * Calculate the display delay for a word based on WPM and punctuation.
- * Words ending with sentence punctuation get a longer pause.
+ * Calculate the display delay for a word based on WPM, punctuation, and line breaks.
+ * Words ending with sentence punctuation or line breaks get a longer pause.
  *
- * @param {string} word - The word to calculate delay for
+ * @param {string} word - The word to calculate delay for (may include '\n' marker)
  * @param {number} wordsPerMinute - Reading speed in WPM
  * @param {boolean} pauseOnPunctuation - Whether to add extra pause on punctuation
  * @param {number} punctuationMultiplier - Multiplier for sentence-ending punctuation
+ * @param {number} wordLengthWPMMultiplier - Percentage increase per character for long words
+ * @param {number} lineBreakMultiplier - Multiplier for line breaks
  * @returns {number} Delay in milliseconds
  */
 export function getWordDelay(
@@ -86,25 +120,40 @@ export function getWordDelay(
   pauseOnPunctuation = true,
   punctuationMultiplier = 2,
   wordLengthWPMMultiplier = 0,
+  lineBreakMultiplier = 3,
 ) {
   if (!word || typeof word !== "string") return 60000 / wordsPerMinute;
   if (!wordsPerMinute || wordsPerMinute <= 0) return 200; // Default fallback
 
   var baseDelay = 60000 / wordsPerMinute;
 
+  // Check if this is a line break marker (blank pause)
+  if (word === '\n') {
+    return baseDelay * lineBreakMultiplier;
+  }
+
+  // Check if this is the first word after a line break (marked with ⟩)
+  const isFirstAfterBreak = word.startsWith('⟩');
+  const cleanWord = isFirstAfterBreak ? word.substring(1) : word;
+
+  // Extra time for first word after line break to help reader reorient
+  if (isFirstAfterBreak) {
+    baseDelay *= 1.5; // 50% longer to help with reorientation
+  }
+
   // Longer pause for long words (12+ characters is roughly 2 standard deviations above average English word length)
-  if (wordLengthWPMMultiplier > 0 && word.length >= 12) {
+  if (wordLengthWPMMultiplier > 0 && cleanWord.length >= 12) {
     // For every character above 12, add wordLengthWPMMultiplier percentage points to delay
-    baseDelay *= 1 + ((wordLengthWPMMultiplier / 100) * (word.length - 12));
+    baseDelay *= 1 + ((wordLengthWPMMultiplier / 100) * (cleanWord.length - 12));
   }
 
   if (pauseOnPunctuation) {
     // Longer pause for sentence-ending punctuation
-    if (/[.!?;:]$/.test(word)) {
+    if (/[.!?;:]$/.test(cleanWord)) {
       return baseDelay * punctuationMultiplier;
     }
     // Shorter pause for commas
-    if (/[,]$/.test(word)) {
+    if (/[,]$/.test(cleanWord)) {
       return baseDelay * 1.5;
     }
   }
@@ -142,12 +191,15 @@ export function splitWordForDisplay(word) {
     return { before: "", orp: "", after: "" };
   }
 
-  const orpIndex = getActualORPIndex(word);
+  // Strip first-word-after-break marker if present
+  const cleanWord = word.startsWith('⟩') ? word.substring(1) : word;
+
+  const orpIndex = getActualORPIndex(cleanWord);
 
   return {
-    before: word.slice(0, orpIndex),
-    orp: word[orpIndex] || "",
-    after: word.slice(orpIndex + 1),
+    before: cleanWord.slice(0, orpIndex),
+    orp: cleanWord[orpIndex] || "",
+    after: cleanWord.slice(orpIndex + 1),
   };
 }
 
@@ -173,14 +225,20 @@ export function shouldPauseAtWord(wordIndex, pauseAfterWords) {
  */
 export function extractWordFrame(allWords, centerIdx, frameSize) {
   if (frameSize <= 1 || centerIdx >= allWords.length) {
-    return { subset: [allWords[centerIdx] || ""], centerOffset: 0 };
+    const word = allWords[centerIdx] || "";
+    // Strip first-word-after-break marker for display
+    const cleanWord = word.startsWith('⟩') ? word.substring(1) : word;
+    return { subset: [cleanWord], centerOffset: 0 };
   }
 
   const radius = Math.floor(frameSize / 2);
   const leftBound = Math.max(0, centerIdx - radius);
   const rightBound = Math.min(allWords.length, centerIdx + radius + 1);
 
-  const subset = allWords.slice(leftBound, rightBound);
+  // Strip markers from all words in the subset for display
+  const subset = allWords.slice(leftBound, rightBound).map(word =>
+    word.startsWith('⟩') ? word.substring(1) : word
+  );
   const centerOffset = centerIdx - leftBound;
 
   return { subset, centerOffset };

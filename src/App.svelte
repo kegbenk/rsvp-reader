@@ -84,7 +84,11 @@
   let pauseDuration = 500;
   let pauseOnPunctuation = true;
   let punctuationPauseMultiplier = 2;
+  let lineBreakPauseMultiplier = 3;
   let wordLengthWPMMultiplier = 50;
+  let showImagesInRSVP = true;
+  let imageDurationSeconds = 3;
+  let chapterProgressDisplayMode = 'timer'; // 'timer' or 'percentage'
 
   // Animation
   let wordOpacity = 1;
@@ -92,8 +96,16 @@
   let fadeTimeoutId = null;
   let autoSaveIntervalId = null;
 
+  // Image display
+  let currentImage = null;
+  let isShowingImage = false;
+
   // Derived state
-  $: currentWord = words[currentWordIndex - 1] || (words.length > 0 ? words[0] : '');
+  $: currentWord = (() => {
+    const word = words[currentWordIndex - 1] || (words.length > 0 ? words[0] : '');
+    // Strip the first-word-after-break marker (⟩) if present
+    return word.startsWith('⟩') ? word.substring(1) : word;
+  })();
   $: wordFrame = extractWordFrame(words, Math.max(0, currentWordIndex - 1), frameWordCount);
   $: timeRemaining = formatTimeRemaining(words.length - currentWordIndex, wordsPerMinute);
   $: isFocusMode = isPlaying || isPaused;
@@ -109,6 +121,15 @@
     return Math.min(100, Math.max(0, (wordOffset / chapterWordCount) * 100));
   })();
 
+  // Chapter time remaining
+  $: chapterTimeRemaining = (() => {
+    if (!contentStructure || !contentStructure.chapters.length) return "0:00";
+    const chapter = contentStructure.chapters[currentChapterIndex];
+    if (!chapter) return "0:00";
+    const wordsRemainingInChapter = chapter.endWordIndex - currentWordIndex;
+    return formatTimeRemaining(wordsRemainingInChapter, wordsPerMinute);
+  })();
+
   function parseText() {
     words = parseTextUtil(text);
     currentWordIndex = 0;
@@ -116,13 +137,25 @@
   }
 
   function getWordDelay(word) {
-    return getWordDelayUtil(word, wordsPerMinute, pauseOnPunctuation, punctuationPauseMultiplier, wordLengthWPMMultiplier);
+    return getWordDelayUtil(word, wordsPerMinute, pauseOnPunctuation, punctuationPauseMultiplier, wordLengthWPMMultiplier, lineBreakPauseMultiplier);
   }
 
   function showNextWord() {
     if (currentWordIndex >= words.length) {
       stop();
       return;
+    }
+
+    // Check if there's an image at this position (if images enabled in RSVP)
+    if (showImagesInRSVP && contentStructure?.images) {
+      const imageAtPosition = contentStructure.images.find(
+        img => img.wordPosition === currentWordIndex
+      );
+
+      if (imageAtPosition) {
+        showImage(imageAtPosition);
+        return; // Will resume after image display
+      }
     }
 
     if (shouldPauseAtWord(currentWordIndex, pauseAfterWords)) {
@@ -156,6 +189,30 @@
     }
 
     scheduleNextWord();
+  }
+
+  function showImage(image) {
+    // Skip unavailable images (EPUBs don't support image display yet)
+    if (image.unavailable) {
+      console.log('[showImage] Skipping unavailable EPUB image, continuing playback');
+      return;
+    }
+
+    currentImage = image;
+    isShowingImage = true;
+    isPaused = true;
+
+    // Resume after configured duration
+    setTimeout(() => {
+      if (isPlaying) {
+        currentImage = null;
+        isShowingImage = false;
+        isPaused = false;
+        progress = ((currentWordIndex + 1) / words.length) * 100;
+        currentWordIndex++;
+        scheduleNextWord();
+      }
+    }, imageDurationSeconds * 1000);
   }
 
   function scheduleNextWord() {
@@ -516,10 +573,14 @@
         fadeDuration,
         pauseOnPunctuation,
         punctuationPauseMultiplier,
+        lineBreakPauseMultiplier,
         wordLengthWPMMultiplier,
         pauseAfterWords,
         pauseDuration,
-        frameWordCount
+        frameWordCount,
+        showImagesInRSVP,
+        imageDurationSeconds,
+        chapterProgressDisplayMode
       }
     });
   }
@@ -567,10 +628,14 @@
       fadeDuration = session.settings.fadeDuration ?? fadeDuration;
       pauseOnPunctuation = session.settings.pauseOnPunctuation ?? pauseOnPunctuation;
       punctuationPauseMultiplier = session.settings.punctuationPauseMultiplier ?? punctuationPauseMultiplier;
+      lineBreakPauseMultiplier = session.settings.lineBreakPauseMultiplier ?? lineBreakPauseMultiplier;
       wordLengthWPMMultiplier = session.settings.wordLengthWPMMultiplier ?? wordLengthWPMMultiplier;
       pauseAfterWords = session.settings.pauseAfterWords ?? pauseAfterWords;
       pauseDuration = session.settings.pauseDuration ?? pauseDuration;
       frameWordCount = session.settings.frameWordCount ?? frameWordCount;
+      showImagesInRSVP = session.settings.showImagesInRSVP ?? showImagesInRSVP;
+      imageDurationSeconds = session.settings.imageDurationSeconds ?? imageDurationSeconds;
+      chapterProgressDisplayMode = session.settings.chapterProgressDisplayMode ?? chapterProgressDisplayMode;
     }
 
     return true;
@@ -886,10 +951,14 @@
         bind:fadeDuration
         bind:pauseOnPunctuation
         bind:punctuationPauseMultiplier
+        bind:lineBreakPauseMultiplier
         bind:wordLengthWPMMultiplier
         bind:pauseAfterWords
         bind:pauseDuration
         bind:frameWordCount
+        bind:showImagesInRSVP
+        bind:imageDurationSeconds
+        bind:chapterProgressDisplayMode
         on:close={() => showSettings = false}
       />
     </div>
@@ -945,6 +1014,8 @@
         {fadeDuration}
         {fadeEnabled}
         multiWordEnabled={frameWordCount > 1}
+        {isShowingImage}
+        {currentImage}
       />
     {:else if readingMode === 'reader' && contentStructure}
       <ReaderDisplay
@@ -1044,7 +1115,9 @@
     <div class="chapter-progress-container">
       <div class="chapter-progress-info">
         <span class="chapter-title">{contentStructure.chapters[currentChapterIndex]?.title || 'Chapter'}</span>
-        <span class="chapter-percentage">{Math.round(chapterProgress)}%</span>
+        <span class="chapter-time-remaining">
+          {chapterProgressDisplayMode === 'timer' ? chapterTimeRemaining : `${Math.round(chapterProgress)}%`}
+        </span>
       </div>
       <div class="chapter-progress-bar">
         <div class="chapter-progress-fill" style="width: {chapterProgress}%"></div>
@@ -1439,7 +1512,7 @@
   .rewind-button {
     position: fixed;
     left: 2rem;
-    top: 50%;
+    top: 70%;
     transform: translateY(-50%);
     width: 56px;
     height: 56px;
@@ -1607,7 +1680,7 @@
   .mode-toggle-button {
     position: fixed;
     right: 2rem;
-    top: 50%;
+    top: 70%;
     transform: translateY(-50%);
     width: 56px;
     height: 56px;
@@ -1678,7 +1751,7 @@
     flex: 1;
   }
 
-  .chapter-percentage {
+  .chapter-time-remaining {
     font-size: 0.75rem;
     color: #ff4444;
     font-weight: 600;
@@ -1713,7 +1786,7 @@
       font-size: 0.7rem;
     }
 
-    .chapter-percentage {
+    .chapter-time-remaining {
       font-size: 0.7rem;
     }
   }
