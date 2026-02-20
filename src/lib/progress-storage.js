@@ -59,7 +59,7 @@ export function saveSession(session) {
       readingMode: session.readingMode || 'rsvp',
       currentChapterIndex: session.currentChapterIndex || 0,
       readerScrollPosition: session.readerScrollPosition || 0,
-      // Store lightweight contentStructure (omit htmlContent to save space)
+      // Store contentStructure with htmlContent (includes resolved images as data URLs)
       contentStructure: session.contentStructure ? {
         chapters: session.contentStructure.chapters.map(ch => ({
           id: ch.id,
@@ -69,11 +69,13 @@ export function saveSession(session) {
           startWordIndex: ch.startWordIndex,
           endWordIndex: ch.endWordIndex,
           wordCount: ch.wordCount,
-          plainText: ch.plainText // Keep plainText for accurate highlighting
-          // htmlContent omitted - will be re-parsed on load
+          plainText: ch.plainText, // Keep plainText for accurate highlighting
+          htmlContent: ch.htmlContent, // Keep htmlContent with resolved images
+          images: ch.images // Keep images for RSVP mode
         })),
         toc: session.contentStructure.toc,
-        hasStructure: session.contentStructure.hasStructure
+        hasStructure: session.contentStructure.hasStructure,
+        images: session.contentStructure.images // Global image list for RSVP mode
       } : null,
       settings: session.settings,
       savedAt: Date.now()

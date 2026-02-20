@@ -31,7 +31,10 @@ export function parseText(text) {
       }
     }
 
-    words.push(...lineWords);
+    // Use loop instead of spread operator to avoid stack overflow on large PDFs
+    for (let j = 0; j < lineWords.length; j++) {
+      words.push(lineWords[j]);
+    }
   }
 
   return words;

@@ -21,6 +21,10 @@
     dispatch('close');
   }
 
+  function clearCache() {
+    dispatch('clearCache');
+  }
+
   // Quick WPM presets
   const wpmPresets = [200, 300, 400, 500];
 </script>
@@ -240,6 +244,26 @@
         <input type="range" min="100" max="2000" step="100" bind:value={pauseDuration} class="slider slider-sm">
       </div>
     {/if}
+  </section>
+
+  <!-- Data Section -->
+  <section class="settings-section">
+    <div class="section-header">
+      <svg viewBox="0 0 24 24" fill="currentColor" class="section-icon">
+        <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4c-1.48 0-2.85.43-4.01 1.17l1.46 1.46C10.21 6.23 11.08 6 12 6c3.04 0 5.5 2.46 5.5 5.5v.5H19c1.66 0 3 1.34 3 3 0 1.13-.64 2.11-1.56 2.62l1.45 1.45C23.16 18.16 24 16.68 24 15c0-2.64-2.05-4.78-4.65-4.96zM3 5.27l2.75 2.74C2.56 8.15 0 10.77 0 14c0 3.31 2.69 6 6 6h11.73l2 2L21 20.73 4.27 4 3 5.27zM7.73 10l8 8H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h1.73z"/>
+      </svg>
+      <span>Data</span>
+    </div>
+
+    <div class="data-actions">
+      <button class="clear-cache-btn" on:click={clearCache}>
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+        </svg>
+        Clear Cache & Saved Progress
+      </button>
+      <p class="hint-text">Removes all saved reading progress and cached files. This cannot be undone.</p>
+    </div>
   </section>
 </div>
 
@@ -533,6 +557,40 @@
     font-size: 0.8rem;
     line-height: 1.3;
   }
+
+  /* Data section */
+  .data-actions {
+    padding: 0.5rem 0;
+  }
+
+  .clear-cache-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    background: #1a1a1a;
+    border: 1px solid #ff4444;
+    color: #ff4444;
+    padding: 1rem;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .clear-cache-btn:hover {
+    background: rgba(255, 68, 68, 0.1);
+    border-color: #ff6666;
+    color: #ff6666;
+  }
+
+  .clear-cache-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
   /* Mobile */
   @media (max-width: 600px) {
     .settings-panel {

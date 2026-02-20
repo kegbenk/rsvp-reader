@@ -3,9 +3,11 @@
  */
 
 const DB_NAME = 'rsvp-reader-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'sessions';
+const EPUB_STORE_NAME = 'epub-files';
 const SESSION_KEY = 'current-session';
+const EPUB_KEY = 'current-epub';
 
 /**
  * Open IndexedDB connection
@@ -22,6 +24,9 @@ function openDB() {
       const db = event.target.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME);
+      }
+      if (!db.objectStoreNames.contains(EPUB_STORE_NAME)) {
+        db.createObjectStore(EPUB_STORE_NAME);
       }
     };
   });
@@ -123,20 +128,94 @@ export async function clearSessionFromIndexedDB() {
   try {
     console.log('[IndexedDB] Clearing session...');
     const db = await openDB();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
+    const tx = db.transaction([STORE_NAME, EPUB_STORE_NAME], 'readwrite');
+    const sessionStore = tx.objectStore(STORE_NAME);
+    const epubStore = tx.objectStore(EPUB_STORE_NAME);
+
+    await Promise.all([
+      new Promise((resolve, reject) => {
+        const request = sessionStore.delete(SESSION_KEY);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      }),
+      new Promise((resolve, reject) => {
+        const request = epubStore.delete(EPUB_KEY);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      })
+    ]);
+
+    db.close();
+    console.log('[IndexedDB] Session and EPUB cleared');
+    return true;
+  } catch (error) {
+    console.error('[IndexedDB] Failed to clear session:', error);
+    return false;
+  }
+}
+
+/**
+ * Save EPUB file ArrayBuffer to IndexedDB
+ * @param {ArrayBuffer} epubArrayBuffer - The EPUB file as ArrayBuffer
+ * @param {string} fileName - Original file name
+ * @returns {Promise<boolean>} Whether the save was successful
+ */
+export async function saveEPUBToIndexedDB(epubArrayBuffer, fileName) {
+  try {
+    console.log('[IndexedDB] Saving EPUB file...', fileName);
+    const db = await openDB();
+    const tx = db.transaction(EPUB_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(EPUB_STORE_NAME);
+
+    const data = {
+      arrayBuffer: epubArrayBuffer,
+      fileName: fileName,
+      savedAt: Date.now()
+    };
 
     await new Promise((resolve, reject) => {
-      const request = store.delete(SESSION_KEY);
+      const request = store.put(data, EPUB_KEY);
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
 
     db.close();
-    console.log('[IndexedDB] Session cleared');
+    console.log('[IndexedDB] EPUB file saved successfully');
     return true;
   } catch (error) {
-    console.error('[IndexedDB] Failed to clear session:', error);
+    console.error('[IndexedDB] Failed to save EPUB file:', error);
     return false;
+  }
+}
+
+/**
+ * Load EPUB file ArrayBuffer from IndexedDB
+ * @returns {Promise<Object|null>} The EPUB data {arrayBuffer, fileName} or null
+ */
+export async function loadEPUBFromIndexedDB() {
+  try {
+    console.log('[IndexedDB] Loading EPUB file...');
+    const db = await openDB();
+    const tx = db.transaction(EPUB_STORE_NAME, 'readonly');
+    const store = tx.objectStore(EPUB_STORE_NAME);
+
+    const data = await new Promise((resolve, reject) => {
+      const request = store.get(EPUB_KEY);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+
+    db.close();
+
+    if (data) {
+      console.log('[IndexedDB] EPUB file loaded successfully:', data.fileName);
+      return data;
+    } else {
+      console.log('[IndexedDB] No EPUB file found');
+      return null;
+    }
+  } catch (error) {
+    console.error('[IndexedDB] Failed to load EPUB file:', error);
+    return null;
   }
 }

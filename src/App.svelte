@@ -556,6 +556,34 @@
     }
   }
 
+  async function handleClearCache() {
+    if (!confirm('Are you sure you want to clear all cached data and saved progress? This cannot be undone.')) {
+      return;
+    }
+
+    try {
+      console.log('[Clear Cache] Clearing all cached data...');
+      await clearSession();
+
+      // Reset app state to initial
+      text = '';
+      words = [];
+      currentWordIndex = 0;
+      currentChapterIndex = 0;
+      readerScrollPosition = 0;
+      progress = 0;
+      contentStructure = null;
+      isPlaying = false;
+      isPaused = false;
+      showSettings = false;
+
+      console.log('[Clear Cache] Cache cleared successfully');
+    } catch (error) {
+      console.error('[Clear Cache] Error:', error);
+      alert('Failed to clear cache. Please try again.');
+    }
+  }
+
   function saveCurrentSession() {
     if (words.length === 0) return false;
 
@@ -960,6 +988,7 @@
         bind:imageDurationSeconds
         bind:chapterProgressDisplayMode
         on:close={() => showSettings = false}
+        on:clearCache={handleClearCache}
       />
     </div>
   {/if}
