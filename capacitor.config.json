@@ -2,5 +2,8 @@
   "appId": "com.velo.reader",
   "appName": "Velo",
   "webDir": "dist",
-  "bundledWebRuntime": false
+  "bundledWebRuntime": false,
+  "packageClassList": [
+    "App.FolioReaderPlugin"
+  ]
 }

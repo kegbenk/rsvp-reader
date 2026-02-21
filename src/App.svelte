@@ -7,6 +7,7 @@
     shouldPauseAtWord
   } from './lib/rsvp-utils.js';
   import { parseFile } from './lib/file-parsers.js';
+  import { Capacitor } from '@capacitor/core';
   import {
     saveSession,
     loadSession,
@@ -26,6 +27,8 @@
   import TextInput from './lib/components/TextInput.svelte';
   import ProgressBar from './lib/components/ProgressBar.svelte';
   import { extractWordFrame } from './lib/rsvp-utils.js';
+  import { getReaderDisplayMode } from './lib/adapters/reader-adapter.js';
+  import { FolioReader } from './lib/native/folio-reader.js';
 
   // Demo text constant
   const DEMO_TEXT = `Rapid serial visual presentation (RSVP) is a scientific method for studying the timing of vision. In RSVP, a sequence of stimuli is shown to an observer at one location in their visual field. This technique has been adapted for speed reading applications, where words are displayed one at a time at a fixed point, eliminating the need for eye movements and potentially increasing reading speed significantly.`;
@@ -45,6 +48,15 @@
   let loadingMessage = '';
   let showJumpTo = false;
   let jumpToValue = '';
+  let currentFile = null;
+  let currentFileType = null;
+  let currentFileName = '';
+  let readerDisplayModeOverride = null;
+  let isOpeningNativePdf = false;
+  let nativePdfError = '';
+  let isOpeningNativeEpub = false;
+  let nativeEpubError = '';
+  let isNativePlatform = false;
 
   // Dual-mode state
   let readingMode = 'rsvp'; // 'rsvp' | 'reader'
@@ -68,6 +80,18 @@
     const userAgent = window.navigator.userAgent.toLowerCase();
     return /iphone|ipad|ipod/.test(userAgent) ||
            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPad on iOS 13+
+  }
+
+  function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    let binary = '';
+
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+
+    return btoa(binary);
   }
 
   // Rewind button state
@@ -109,6 +133,8 @@
   $: wordFrame = extractWordFrame(words, Math.max(0, currentWordIndex - 1), frameWordCount);
   $: timeRemaining = formatTimeRemaining(words.length - currentWordIndex, wordsPerMinute);
   $: isFocusMode = isPlaying || isPaused;
+  $: readerDisplayMode = readerDisplayModeOverride
+    ?? getReaderDisplayMode({ fileType: currentFileType });
 
   // Chapter progress calculation
   $: chapterProgress = (() => {
@@ -492,15 +518,89 @@
 
   function handleTextApply(event) {
     text = event.detail.text;
+    currentFile = null;
+    currentFileType = null;
+    currentFileName = '';
+    readerDisplayModeOverride = null;
+    nativeEpubError = '';
     stop();
     parseText();
     showTextInput = false;
     textInputValue = ''; // Clear the input for next time
   }
 
+  async function openNativePdf() {
+    nativePdfError = '';
+
+    if (!Capacitor.isNativePlatform()) {
+      nativePdfError = 'Native PDF viewing is only available on iOS.';
+      return;
+    }
+
+    if (!Capacitor.isPluginAvailable('FileViewer')) {
+      nativePdfError = 'FileViewer plugin is not available in this build.';
+      return;
+    }
+
+    if (!currentFile || currentFileType !== 'pdf') {
+      nativePdfError = 'Original PDF file is not available.';
+      return;
+    }
+
+    isOpeningNativePdf = true;
+
+    try {
+      nativePdfError = 'Native PDF viewer is temporarily disabled.';
+    } catch (error) {
+      nativePdfError = error?.message ?? 'Failed to open PDF.';
+    } finally {
+      isOpeningNativePdf = false;
+    }
+  }
+
+  async function openNativeEpub() {
+    nativeEpubError = '';
+
+    if (!Capacitor.isNativePlatform()) {
+      nativeEpubError = 'Native EPUB viewing is only available on iOS.';
+      return;
+    }
+
+    if (!Capacitor.isPluginAvailable('FolioReader')) {
+      nativeEpubError = 'FolioReader plugin is not available in this build.';
+      return;
+    }
+
+    if (!currentFile || currentFileType !== 'epub') {
+      nativeEpubError = 'Original EPUB file is not available.';
+      return;
+    }
+
+    isOpeningNativeEpub = true;
+
+    try {
+      const arrayBuffer = await currentFile.arrayBuffer();
+      const base64 = arrayBufferToBase64(arrayBuffer);
+
+      await FolioReader.open({
+        data: base64,
+        fileName: currentFileName || 'document.epub',
+        title: currentFileName || 'EPUB'
+      });
+    } catch (error) {
+      nativeEpubError = error?.message ?? 'Failed to open EPUB.';
+    } finally {
+      isOpeningNativeEpub = false;
+    }
+  }
+
   async function handleFileSelect(event) {
     const file = event.detail.file;
     if (!file) return;
+    currentFile = file;
+    currentFileName = file.name || '';
+    readerDisplayModeOverride = null;
+    nativePdfError = '';
 
     // Stop playback and auto-save FIRST (before setting loading flag)
     if (isPlaying || isPaused) {
@@ -522,6 +622,7 @@
 
     try {
       const result = await parseFile(file);
+      currentFileType = result.fileType ?? null;
 
       // Handle structured content (EPUB with TOC) or plain text (PDF)
       if (result.contentStructure) {
@@ -573,6 +674,10 @@
       readerScrollPosition = 0;
       progress = 0;
       contentStructure = null;
+      currentFile = null;
+      currentFileType = null;
+      currentFileName = '';
+      nativeEpubError = '';
       isPlaying = false;
       isPaused = false;
       showSettings = false;
@@ -589,6 +694,8 @@
 
     return saveSession({
       text,
+      fileType: currentFileType,
+      fileName: currentFileName,
       currentWordIndex,
       totalWords: words.length,
       readingMode,
@@ -630,6 +737,11 @@
     }
 
     text = session.text;
+    currentFileType = session.fileType ?? null;
+    currentFileName = session.fileName ?? '';
+    readerDisplayModeOverride = null;
+    nativePdfError = '';
+    nativeEpubError = '';
     words = parseTextUtil(text);
 
     // Validate parsed words
@@ -848,6 +960,7 @@
 
     // Detect device
     isIOS = detectIOS();
+    isNativePlatform = Capacitor.isNativePlatform();
     console.log('[Device] iOS detected:', isIOS);
 
     // Debug: Log mount time and check for saved session
@@ -918,6 +1031,32 @@
           >
             <svg viewBox="0 0 24 24" fill="currentColor">
               <path d="M3 9h14V7H3v2zm0 4h14v-2H3v2zm0 4h14v-2H3v2zm16 0h2v-2h-2v2zm0-10v2h2V7h-2zm0 6h2v-2h-2v2z"/>
+            </svg>
+          </button>
+        {/if}
+
+        {#if isNativePlatform && currentFileType === 'pdf'}
+          <button
+            class="icon-btn"
+            on:click={() => { readerDisplayModeOverride = null; openNativePdf(); }}
+            title="Open PDF in native viewer"
+            aria-label="Open PDF in native viewer"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm1 7h4v11H6V4h7v5z"/>
+            </svg>
+          </button>
+        {/if}
+
+        {#if isNativePlatform && currentFileType === 'epub'}
+          <button
+            class="icon-btn"
+            on:click={() => { readerDisplayModeOverride = null; openNativeEpub(); }}
+            title="Open EPUB in native viewer"
+            aria-label="Open EPUB in native viewer"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 2h9l5 5v15c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2zm8 1.5V8h4.5L14 3.5zM8 12h8v2H8v-2zm0 4h8v2H8v-2z"/>
             </svg>
           </button>
         {/if}
@@ -1047,18 +1186,66 @@
         {currentImage}
       />
     {:else if readingMode === 'reader' && contentStructure}
-      <ReaderDisplay
-        chapter={contentStructure.chapters[currentChapterIndex]}
-        {contentStructure}
-        {currentChapterIndex}
-        scrollPosition={readerScrollPosition}
-        autoScroll={readerAutoScroll}
-        scrollSpeed={wordsPerMinute}
-        {highlightWordIndex}
-        on:scroll={handleReaderScroll}
-        on:chapterChange={handleReaderChapterChange}
-        on:wordClick={handleReaderWordClick}
-      />
+      {#if readerDisplayMode === 'native-pdf' && currentFileType === 'pdf' && isNativePlatform}
+        <div class="native-pdf-panel">
+          <div class="native-pdf-card">
+            <h2>Open PDF</h2>
+            <p>Use the native iOS PDF viewer for the best rendering quality.</p>
+            <button
+              class="primary-btn"
+              on:click={openNativePdf}
+              disabled={isOpeningNativePdf}
+            >
+              {isOpeningNativePdf ? 'Opening...' : 'Open PDF'}
+            </button>
+            <button
+              class="secondary-btn"
+              on:click={() => { readerDisplayModeOverride = 'web'; }}
+            >
+              Use text view instead
+            </button>
+            {#if nativePdfError}
+              <p class="native-pdf-error">{nativePdfError}</p>
+            {/if}
+          </div>
+        </div>
+      {:else if readerDisplayMode === 'native-epub' && currentFileType === 'epub' && isNativePlatform}
+        <div class="native-pdf-panel">
+          <div class="native-pdf-card">
+            <h2>Open EPUB</h2>
+            <p>Use the native EPUB viewer for improved rendering and layout.</p>
+            <button
+              class="primary-btn"
+              on:click={openNativeEpub}
+              disabled={isOpeningNativeEpub}
+            >
+              {isOpeningNativeEpub ? 'Opening...' : 'Open EPUB'}
+            </button>
+            <button
+              class="secondary-btn"
+              on:click={() => { readerDisplayModeOverride = 'web'; }}
+            >
+              Use text view instead
+            </button>
+            {#if nativeEpubError}
+              <p class="native-pdf-error">{nativeEpubError}</p>
+            {/if}
+          </div>
+        </div>
+      {:else}
+        <ReaderDisplay
+          chapter={contentStructure.chapters[currentChapterIndex]}
+          {contentStructure}
+          {currentChapterIndex}
+          scrollPosition={readerScrollPosition}
+          autoScroll={readerAutoScroll}
+          scrollSpeed={wordsPerMinute}
+          {highlightWordIndex}
+          on:scroll={handleReaderScroll}
+          on:chapterChange={handleReaderChapterChange}
+          on:wordClick={handleReaderWordClick}
+        />
+      {/if}
     {:else}
       <div class="no-content">
         <p>Load an EPUB file to use reader mode</p>
@@ -1314,6 +1501,71 @@
     padding: 2rem;
   }
 
+  .native-pdf-panel {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .native-pdf-card {
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 1.5rem;
+    max-width: 360px;
+    width: 100%;
+    text-align: center;
+  }
+
+  .native-pdf-card h2 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+    color: #fff;
+  }
+
+  .native-pdf-card p {
+    margin: 0 0 1rem 0;
+    color: #aaa;
+    font-size: 0.9rem;
+  }
+
+  .primary-btn,
+  .secondary-btn {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .primary-btn {
+    background: #ff4444;
+    color: #fff;
+    border-color: #ff4444;
+    margin-bottom: 0.5rem;
+  }
+
+  .primary-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .secondary-btn {
+    background: transparent;
+    color: #ccc;
+    border-color: #333;
+  }
+
+  .native-pdf-error {
+    margin-top: 0.75rem;
+    color: #ff7777;
+    font-size: 0.85rem;
+  }
+
   .display-area {
     flex: 1;
     display: flex;
@@ -1412,11 +1664,17 @@
   /* Mobile styles */
   @media (max-width: 600px) {
     main {
-      padding: 1rem;
+      padding: calc(1rem + env(safe-area-inset-top))
+        calc(1rem + env(safe-area-inset-right))
+        calc(1rem + env(safe-area-inset-bottom))
+        calc(1rem + env(safe-area-inset-left));
     }
 
     main.focus-mode {
-      padding: 0.5rem;
+      padding: calc(0.5rem + env(safe-area-inset-top))
+        calc(0.5rem + env(safe-area-inset-right))
+        calc(0.5rem + env(safe-area-inset-bottom))
+        calc(0.5rem + env(safe-area-inset-left));
     }
 
     .panel-overlay {
@@ -1757,7 +2015,7 @@
   /* Chapter Progress Bar */
   .chapter-progress-container {
     position: fixed;
-    top: 1rem;
+    top: calc(1rem + env(safe-area-inset-top));
     right: 2rem;
     width: 250px;
     background: rgba(26, 26, 26, 0.9);
@@ -1811,7 +2069,7 @@
 
   @media (max-width: 600px) {
     .chapter-progress-container {
-      top: 1rem;
+      top: calc(1rem + env(safe-area-inset-top));
       right: 1rem;
       width: 200px;
       padding: 0.5rem;

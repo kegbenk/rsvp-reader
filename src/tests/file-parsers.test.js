@@ -97,9 +97,11 @@ describe('parsePDF', () => {
     const file = createMockFile('fake pdf content', 'test.pdf', 'application/pdf')
 
     const result = await parseFile(file)
+    const normalized = result.text.replace(/\s+/g, ' ').trim()
 
     expect(pdfjsLib.getDocument).toHaveBeenCalled()
-    expect(result).toBe('Hello World')
+    expect(result.fileType).toBe('pdf')
+    expect(normalized).toBe('Hello World')
   })
 
   it('should handle multi-page PDFs', async () => {
@@ -131,9 +133,11 @@ describe('parsePDF', () => {
     const file = createMockFile('fake pdf content', 'multipage.pdf', 'application/pdf')
 
     const result = await parseFile(file)
+    const normalized = result.text.replace(/\s+/g, ' ').trim()
 
     expect(mockPdf.getPage).toHaveBeenCalledTimes(2)
-    expect(result).toBe('Page One Page Two')
+    expect(result.fileType).toBe('pdf')
+    expect(normalized).toBe('Page One Page Two')
   })
 
   it('should filter out non-text items from PDF', async () => {
@@ -161,8 +165,10 @@ describe('parsePDF', () => {
     const file = createMockFile('fake pdf content', 'test.pdf', 'application/pdf')
 
     const result = await parseFile(file)
+    const normalized = result.text.replace(/\s+/g, ' ').trim()
 
-    expect(result).toBe('Text Content')
+    expect(result.fileType).toBe('pdf')
+    expect(normalized).toBe('Text Content')
   })
 })
 
@@ -193,9 +199,11 @@ describe('parseEPUB', () => {
     const file = createMockFile('fake epub content', 'test.epub', 'application/epub+zip')
 
     const result = await parseFile(file)
+    const normalized = result.text.replace(/\s+/g, ' ').trim()
 
     expect(epubjs.default).toHaveBeenCalled()
-    expect(result).toBe('Chapter content here')
+    expect(result.fileType).toBe('epub')
+    expect(normalized).toBe('Chapter content here')
   })
 
   it('should handle EPUB with multiple chapters', async () => {
@@ -223,8 +231,10 @@ describe('parseEPUB', () => {
     const file = createMockFile('fake epub content', 'multiChapter.epub', 'application/epub+zip')
 
     const result = await parseFile(file)
+    const normalized = result.text.replace(/\s+/g, ' ').trim()
 
-    expect(result).toBe('Chapter One Chapter Two')
+    expect(result.fileType).toBe('epub')
+    expect(normalized).toBe('Chapter One Chapter Two')
   })
 
   it('should handle failed section loads gracefully', async () => {
@@ -253,8 +263,10 @@ describe('parseEPUB', () => {
 
     // Should not throw, should continue with other sections
     const result = await parseFile(file)
+    const normalized = result.text.replace(/\s+/g, ' ').trim()
 
-    expect(result).toBe('Working chapter')
+    expect(result.fileType).toBe('epub')
+    expect(normalized).toBe('Working chapter')
   })
 })
 
@@ -288,10 +300,12 @@ describe('text cleaning', () => {
     const file = createMockFile('fake pdf content', 'spaces.pdf', 'application/pdf')
 
     const result = await parseFile(file)
+    const normalized = result.text.replace(/\s+/g, ' ').trim()
 
     // Multiple spaces should be collapsed
-    expect(result).not.toContain('   ')
-    expect(result).toBe('Hello World')
+    expect(result.text).not.toContain('   ')
+    expect(result.fileType).toBe('pdf')
+    expect(normalized).toBe('Hello World')
   })
 
   it('should clean repeated punctuation', async () => {
@@ -318,7 +332,9 @@ describe('text cleaning', () => {
     const file = createMockFile('fake pdf content', 'punctuation.pdf', 'application/pdf')
 
     const result = await parseFile(file)
+    const normalized = result.text.replace(/\s+/g, ' ').trim()
 
-    expect(result).toBe('What? Really!')
+    expect(result.fileType).toBe('pdf')
+    expect(normalized).toBe('What? Really!')
   })
 })

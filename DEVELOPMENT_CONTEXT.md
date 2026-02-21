@@ -222,8 +222,11 @@ See `COMMERCIALIZATION_ROADMAP.md` for complete business plan.
 1. Install Capacitor: `npm install @capacitor/core @capacitor/cli`
 2. Initialize: `npx cap init "Velo" "com.velo.reader"`
 3. Add platforms: `npm install @capacitor/ios @capacitor/android`
-4. Build and sync: `npm run build && npx cap sync`
-5. Open in Xcode/Android Studio: `npx cap open ios/android`
+4. Build and sync: `npm run build && npm run cap:sync:ios`
+5. If using native EPUB (FolioReaderKit), run CocoaPods:
+   - `cd ios/App && pod install`
+   - Open `ios/App/App.xcworkspace`
+6. Open in Xcode/Android Studio: `npx cap open ios/android`
 
 ## Code Style and Conventions
 

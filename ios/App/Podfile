@@ -1,0 +1,41 @@
+platform :ios, '15.0'
+
+use_frameworks!
+
+target 'App' do
+  pod 'FolioReaderKit'
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+    end
+  end
+
+  folio_audio = File.join(__dir__, 'Pods', 'FolioReaderKit', 'Source', 'FolioReaderAudioPlayer.swift')
+  if File.exist?(folio_audio)
+    contents = File.read(folio_audio)
+    if contents.include?('func registerCommandsIfNeeded()')
+      contents = contents.gsub(
+        /func registerCommandsIfNeeded\(\)\s*\{[\s\S]*?\n\s*\}/,
+        "func registerCommandsIfNeeded() {\n        return\n    }"
+      )
+      File.write(folio_audio, contents)
+      puts '[Podfile] Stubbed FolioReaderKit MPRemoteCommand registration'
+    end
+  end
+
+  folio_config = File.join(__dir__, 'Pods', 'FolioReaderKit', 'Source', 'FolioReaderConfig.swift')
+  if File.exist?(folio_config)
+    contents = File.read(folio_config)
+    if contents.include?('open var realmConfiguration')
+      contents = contents.gsub(
+        /open var realmConfiguration\s*=\s*Realm\.Configuration\(schemaVersion:\s*2\)/,
+        "open var realmConfiguration         = Realm.Configuration(schemaVersion: 2, deleteRealmIfMigrationNeeded: true, objectTypes: [Highlight.self])"
+      )
+      File.write(folio_config, contents)
+      puts '[Podfile] Scoped FolioReaderKit Realm configuration to Highlight only'
+    end
+  end
+end

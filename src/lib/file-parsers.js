@@ -329,18 +329,26 @@ function cleanText(text) {
 /**
  * Detect file type and parse accordingly
  * @param {File} file - The file to parse
- * @returns {Promise<{text: string, words?: string[], contentStructure?: Object}>} The parsed content
+ * @returns {Promise<{text: string, words?: string[], contentStructure?: Object, fileType: 'pdf' | 'epub'}>} The parsed content
  */
 export async function parseFile(file) {
   const fileName = file.name.toLowerCase()
 
   if (fileName.endsWith('.pdf')) {
     // Parse PDF with structure (outline/TOC) extraction
-    return await parsePDFWithStructure(file);
+    const result = await parsePDFWithStructure(file);
+    return {
+      ...result,
+      fileType: 'pdf'
+    };
   } else if (fileName.endsWith('.epub')) {
     // Note: EPUB image display is not currently supported due to epubjs API limitations
     // Use structured parser for EPUBs to extract TOC and chapters
-    return await parseEPUBWithStructure(file);
+    const result = await parseEPUBWithStructure(file);
+    return {
+      ...result,
+      fileType: 'epub'
+    };
   } else {
     throw new Error(`Unsupported file type: ${fileName}`)
   }
