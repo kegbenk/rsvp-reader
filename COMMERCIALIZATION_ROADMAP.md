@@ -73,7 +73,7 @@ This document outlines the complete path from the current open-source Svelte web
 ```bash
 # 1. Install Capacitor
 npm install @capacitor/core @capacitor/cli
-npx cap init "RSVP Reader" "com.yourcompany.rsvpreader"
+npx cap init "Velo" "com.velo.reader"
 
 # 2. Add platforms
 npm install @capacitor/ios @capacitor/android

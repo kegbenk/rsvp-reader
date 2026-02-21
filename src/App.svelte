@@ -892,7 +892,7 @@
   <!-- Header - hidden during focus mode -->
   {#if !isFocusMode}
     <header>
-      <h1>RSVP Reader</h1>
+      <h1>Velo</h1>
       <div class="header-actions">
         <!-- Mode toggle button (only if structured content) -->
         {#if contentStructure}
@@ -1236,14 +1236,20 @@
     background-color: #000;
     color: #fff;
     font-family: 'Segoe UI', system-ui, sans-serif;
-    padding: 2rem;
+    padding: calc(2rem + env(safe-area-inset-top))
+      calc(2rem + env(safe-area-inset-right))
+      calc(2rem + env(safe-area-inset-bottom))
+      calc(2rem + env(safe-area-inset-left));
     box-sizing: border-box;
     transition: padding 0.3s ease;
     overflow: hidden;
   }
 
   main.focus-mode {
-    padding: 1rem;
+    padding: calc(1rem + env(safe-area-inset-top))
+      calc(1rem + env(safe-area-inset-right))
+      calc(1rem + env(safe-area-inset-bottom))
+      calc(1rem + env(safe-area-inset-left));
   }
 
   header {

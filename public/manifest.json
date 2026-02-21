@@ -1,6 +1,6 @@
 {
-  "name": "RSVP Reader",
-  "short_name": "RSVP",
+  "name": "Velo",
+  "short_name": "Velo",
   "description": "Speed reading with Rapid Serial Visual Presentation",
   "start_url": "/",
   "display": "standalone",

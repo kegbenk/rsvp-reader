@@ -220,7 +220,7 @@ See `COMMERCIALIZATION_ROADMAP.md` for complete business plan.
 
 **Technical Path**:
 1. Install Capacitor: `npm install @capacitor/core @capacitor/cli`
-2. Initialize: `npx cap init "RSVP Reader" "com.yourcompany.rsvpreader"`
+2. Initialize: `npx cap init "Velo" "com.velo.reader"`
 3. Add platforms: `npm install @capacitor/ios @capacitor/android`
 4. Build and sync: `npm run build && npx cap sync`
 5. Open in Xcode/Android Studio: `npx cap open ios/android`

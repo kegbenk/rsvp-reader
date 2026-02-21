@@ -1,5 +1,5 @@
 {
-  "name": "rsvp",
+  "name": "velo",
   "private": true,
   "version": "1.0.1",
   "type": "module",
@@ -21,6 +21,9 @@
     "vitest": "^4.0.17"
   },
   "dependencies": {
+    "@capacitor/cli": "^8.1.0",
+    "@capacitor/core": "^8.1.0",
+    "@capacitor/ios": "^8.1.0",
     "epubjs": "^0.3.93",
     "pdfjs-dist": "^5.4.530"
   }

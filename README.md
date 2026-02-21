@@ -1,6 +1,6 @@
-# RSVP Reader Enhanced
+# Velo
 
-**An advanced fork of RSVP Reader with dual reading modes, iOS persistence, and mobile-first enhancements.**
+**Formerly RSVP Reader.** An advanced speed reading app with dual reading modes, iOS persistence, and mobile-first enhancements.
 
 > **Forked from**: [thomaskolmans/rsvp-reading](https://github.com/thomaskolmans/rsvp-reading) (MIT License)
 > **Enhanced by**: Brandon Keller ([@kegbenk](https://github.com/kegbenk))
@@ -339,7 +339,7 @@ To convert this web app to a native mobile app:
 1. Install Capacitor:
    ```bash
    npm install @capacitor/core @capacitor/cli
-   npx cap init "RSVP Reader" "com.yourcompany.rsvpreader"
+   npx cap init "Velo" "com.velo.reader"
    ```
 
 2. Add platforms:
